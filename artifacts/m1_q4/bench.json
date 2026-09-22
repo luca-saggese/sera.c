@@ -1,0 +1,66 @@
+{
+  "git_commit": "16efa1f6ecfeb3073a8c05f6b5f2d0e1dbfd1dce",
+  "model": "models/Qwen3-32B-Q4_K_M.gguf",
+  "tensor": "blk.0.ffn_gate.weight",
+  "qtype": "Q4_K",
+  "N": 25600,
+  "K": 5120,
+  "weight_bytes": 73728000,
+  "workspace_bytes": 5571072,
+  "device": "NVIDIA GB10 (sm_121a)",
+  "method": "1 warmup + 3 measured, median",
+  "results": [
+    {
+      "batch": 1,
+      "path": "MMVQ",
+      "activation_quant_ms": 0.0132,
+      "kernel_ms": 0.4921,
+      "total_ms": 0.5159,
+      "tokens_per_s": 1938.35,
+      "effective_weight_gbps": 142.91,
+      "kernel_launches": 1,
+      "cuda_allocations": 0,
+      "host_syncs": 0,
+      "workspace_bytes": 5571072
+    },
+    {
+      "batch": 4,
+      "path": "MMVQ",
+      "activation_quant_ms": 0.0122,
+      "kernel_ms": 0.6693,
+      "total_ms": 0.6938,
+      "tokens_per_s": 5765.42,
+      "effective_weight_gbps": 106.27,
+      "kernel_launches": 1,
+      "cuda_allocations": 0,
+      "host_syncs": 0,
+      "workspace_bytes": 5571072
+    },
+    {
+      "batch": 16,
+      "path": "MMQ",
+      "activation_quant_ms": 0.0286,
+      "kernel_ms": 0.5535,
+      "total_ms": 0.599,
+      "tokens_per_s": 26710.83,
+      "effective_weight_gbps": 123.08,
+      "kernel_launches": 1,
+      "cuda_allocations": 0,
+      "host_syncs": 0,
+      "workspace_bytes": 5571072
+    },
+    {
+      "batch": 32,
+      "path": "MMQ",
+      "activation_quant_ms": 0.0237,
+      "kernel_ms": 0.6991,
+      "total_ms": 0.7456,
+      "tokens_per_s": 42920.3,
+      "effective_weight_gbps": 98.89,
+      "kernel_launches": 1,
+      "cuda_allocations": 0,
+      "host_syncs": 0,
+      "workspace_bytes": 5571072
+    }
+  ]
+}

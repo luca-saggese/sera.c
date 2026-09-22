@@ -1,8 +1,10 @@
 /* q3_main.c — q3 inspection CLI: platform probe, GGUF inventory, residency
  * plan and fast resident CUDA load.
  *
- * Ported from the q38 donor (COPY -> RENAME -> EDIT). The M0 surface is
+ * Ported from the q38 donor (COPY -> RENAME -> EDIT). The surface is
  * deliberately narrow: no decode, no generation, no server, no tokenizer.
+ * M1 adds one diagnostic mode, --bench-q4-linear, which exercises the
+ * resident Q4_K quantized linear primitive on a real model tensor.
  */
 
 #include "q3.h"
@@ -12,6 +14,7 @@
 #include "q3_platform.h"
 #include "q3_residency_plan.h"
 #include "q3_model_loader_cuda.h"
+#include "q3_q4_linear.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -31,8 +34,12 @@ static void usage(FILE *fp) {
         "  --list-tensors <model.gguf> List individual tensors with offsets\n"
         "  --memory-plan <model.gguf> Dry-run residency plan (no allocation)\n"
         "  --load-only <model.gguf>   Fast resident CUDA load; no inference\n"
+        "  --bench-q4-linear <model.gguf>\n"
+        "                             Benchmark the resident Q4_K linear primitive\n"
         "\n"
         "options:\n"
+        "  --tensor <name>            Tensor to benchmark (default: largest Q4_K)\n"
+        "  --batch <a,b,...>          Batch sizes (default: 1,4,16,32)\n"
         "  --json                     Machine-readable output\n"
         "  --verbose                  Extra diagnostics\n");
 }
@@ -448,6 +455,7 @@ static double mono_ms(void) {
     return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
 }
 
+
 static int cmd_load_only(const q3_options *opt) {
     char err[256];
     const double open_started = mono_ms();
@@ -554,6 +562,28 @@ int main(int argc, char **argv) {
             mode = Q3_MODE_LOAD_ONLY;
             if (i + 1 >= argc) { usage(stderr); return 2; }
             opt.model_path = argv[++i];
+        } else if (strcmp(a, "--bench-q4-linear") == 0) {
+            mode = Q3_MODE_BENCH_Q4_LINEAR;
+            if (i + 1 >= argc) { usage(stderr); return 2; }
+            opt.model_path = argv[++i];
+        } else if (strcmp(a, "--tensor") == 0) {
+            if (i + 1 >= argc) { usage(stderr); return 2; }
+            opt.tensor_name = argv[++i];
+        } else if (strcmp(a, "--batch") == 0) {
+            if (i + 1 >= argc) { usage(stderr); return 2; }
+            const char *spec = argv[++i];
+            opt.batch_count = 0;
+            while (*spec && opt.batch_count < 16) {
+                char *end = NULL;
+                const long v = strtol(spec, &end, 10);
+                if (end == spec || v <= 0) break;
+                opt.batches[opt.batch_count++] = (int) v;
+                spec = (*end == ',') ? end + 1 : end;
+            }
+            if (opt.batch_count == 0) {
+                fprintf(stderr, "q3: --batch expects a positive list\n");
+                return 2;
+            }
         } else if (strcmp(a, "--json") == 0) {
             opt.json = true;
         } else if (strcmp(a, "--verbose") == 0) {
@@ -580,6 +610,7 @@ int main(int argc, char **argv) {
     case Q3_MODE_LIST_TENSORS: rc = cmd_list_tensors(&opt); break;
     case Q3_MODE_MEMORY_PLAN:  rc = cmd_memory_plan(&opt); break;
     case Q3_MODE_LOAD_ONLY:    rc = cmd_load_only(&opt); break;
+    case Q3_MODE_BENCH_Q4_LINEAR: rc = q3_cmd_bench_q4_linear(&opt); break;
     default:                   rc = 2; break;
     }
 

@@ -220,8 +220,8 @@ extern "C" size_t q3_mmq_arena_bytes(void) {
  * Dense Q4_K x FP32 -> FP32, MMQ tile path. All M.
  *
  * Mirrors the donor's ds4_mmq_dense_impl<GGML_TYPE_Q4_K> with the DS4-only
- * branches removed: no x_soa, no fp4 path, no env knobs, no facebook
- * expert handling.
+ * branches removed: no fp4 path, no env knobs, no facebook expert
+ * handling.
  * ------------------------------------------------------------------ */
 extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
                                  float *out_f32, int M, int N, int K,
@@ -322,9 +322,6 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
     args.stride_sample_dst = 0;
     args.use_stream_k = use_stream_k;
     args.ncols_max = N;
-    /* DS4 aligned-SoA artifact: not used by the Q4_K dense path. */
-    args.x_soa = nullptr;
-    args.soa_blocks = 0;
 
     /* mul_mat_q_case slices its stream-K fixup scratch out of the same
      * arena through the pool returned by ctx.pool(). */

@@ -322,3 +322,30 @@ Do **not** remove: the `ybuf_memset` determinism fix, `ds4_mmq_sanitize_f32`, `u
    GGUF physical layout, so the oracle reads the resident bytes directly.
 
 **Nothing is reimplemented.** M1 is a port/trimming/wiring exercise. Research stops here.
+---
+
+## 9. Trim actually applied (post-port)
+
+The first working boundary copied the full closure (~12.9k LOC in `cuda/vendor/`) so that Q4_K
+parity could be established before any pruning. Once `q3_cuda_q4k_linear()` passed the CPU oracle at
+M=1/4/16, the following reductions were applied and re-verified:
+
+| Change | Effect |
+|---|---|
+| `mmq.cuh`: removed the DS4 `x_soa` / `soa_blocks` aligned-SoA artifact hooks (Q2_K / IQ2_XXS only) | deleted the branch + the `const char * x_soa` parameter from the tile loader, `mul_mat_q`, and `mmq_args`; ~120 LOC |
+| `mmq.cuh`: `DECL_MMQ_CASE` reduced from 20 instantiations to `GGML_TYPE_Q4_K` only | drops 19 template instantiations; the q3 TU instantiates Q4_K itself |
+| `mmvq.cu`: `mul_mat_vec_q_switch_type` reduced to a Q4_K-only `switch` with `GGML_ABORT` default | no silent fallback, per M1 §13 |
+| `mmvq.cu`: removed the fused-GLU epilogue (`GGML_GLU_OP_SWIGLU` / `GEGLU` / `SWIGLU_OAI`) | M1 forbids fused epilogues; every GLU op now degrades to the plain product |
+| `mmvq.cu` / `mmvq.cuh`: dropped the upstream ggml-tensor entries (`ggml_cuda_mul_mat_vec_q`, `ggml_cuda_op_mul_mat_vec_q`) | the q3 ABI calls `mul_mat_q_switch_type` directly |
+| `cuda/vendor/unary.cuh` deleted | its only consumer was the removed GLU epilogue |
+| `cuda/q3_mmq.cu`: dropped `args.x_soa` / `args.soa_blocks` initialisation | follows the `mmq_args` change |
+
+Still present but compile-time dead for a Q4_K-only instantiation (kept for upstream diff-cleanliness
+and because removal would require cross-cutting template surgery with no runtime benefit): the
+Blackwell FP4 scaffolding (`MMQ_ITER_K_FP4`, `QK_FP4_MMQ`, `block_fp4_mmq`), the non-Q4_K
+`mmq_type_traits` specialisations, the AMD/HIP/CDNA/RDNA `#ifdef` branches in `common.cuh`/`mma.cuh`,
+and the MoE `ids` parameters. These cost no runtime performance and do not affect the accepted
+backend.
+
+After the trim, correctness is unchanged (cos ≥ 0.99995, rel-L2 < 1% at M=16) and the benchmark
+numbers are within run-to-run noise of the pre-trim run.

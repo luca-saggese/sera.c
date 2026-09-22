@@ -38,7 +38,8 @@ CUDA_OBJS := \
 	cuda/q3_model_loader_cuda.o \
 	cuda/q3_cuda_primitives.o \
 	cuda/q3_mmq.o \
-	cuda/q3_q4_linear.o
+	cuda/q3_q4_linear.o \
+	cuda/q3_bench_q4_linear.o
 
 # Vendored donor compute closure (COPY -> RENAME -> EDIT from q38.c @ main).
 VENDOR_OBJS := \

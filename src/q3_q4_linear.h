@@ -23,6 +23,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "q3.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -99,6 +101,10 @@ bool q3_cuda_q4k_linear(const q3_q4_linear_geometry *geometry,
                         void *stream,
                         q3_q4_linear_stats *stats,
                         char *error, size_t error_len);
+
+/* M1 diagnostic: --bench-q4-linear. Defined in q3_bench_q4_linear.cu so the
+ * CLI (plain C) can call it without seeing CUDA types. */
+int q3_cmd_bench_q4_linear(const q3_options *opt);
 
 /* Fill activation_quant_ms / kernel_ms / total_ms from the stream events
  * recorded by the last q3_cuda_q4k_linear() call. Call only after the

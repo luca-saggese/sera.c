@@ -26,6 +26,7 @@ typedef enum {
     Q3_MODE_LIST_TENSORS, /* --list-tensors model.gguf */
     Q3_MODE_MEMORY_PLAN,  /* --memory-plan model.gguf */
     Q3_MODE_LOAD_ONLY,    /* --load-only model.gguf */
+    Q3_MODE_BENCH_Q4_LINEAR, /* --bench-q4-linear model.gguf */
 } q3_mode;
 
 /* --- Narrowed engine options -------------------------------------- */
@@ -38,6 +39,9 @@ typedef struct {
     bool platform;        /* --platform */
     bool json;            /* --json */
     bool verbose;         /* --verbose */
+    const char *tensor_name; /* --tensor <name> */
+    int batches[16];      /* --batch 1,4,16,32 */
+    int batch_count;
 } q3_options;
 
 /* --- Platform probe ----------------------------------------------- */

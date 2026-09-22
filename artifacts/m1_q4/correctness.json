@@ -1,0 +1,47 @@
+{
+  "git_commit": "16efa1f6ecfeb3073a8c05f6b5f2d0e1dbfd1dce",
+  "model": "models/Qwen3-32B-Q4_K_M.gguf",
+  "tensor": "blk.0.ffn_gate.weight",
+  "qtype": "Q4_K",
+  "rows_gguf_dim0_K": 5120,
+  "cols_gguf_dim1_N": 25600,
+  "N": 25600,
+  "K": 5120,
+  "weight_bytes": 73728000,
+  "oracle": "q38.c main CPU Q4_K dequantization + FP32 reference matmul",
+  "activations": "deterministic sin/cos, no RNG",
+  "tolerance": {
+    "cosine_similarity_min": 0.999,
+    "rel_l2_max": 0.01
+  },
+  "metrics": {
+    "1": {
+      "max_abs_error": 0.01343,
+      "mean_abs_error": 0.001883,
+      "rmse": 0.002479,
+      "max_rel_error": 0.00411,
+      "rel_l2_error": 0.00392,
+      "cosine_similarity": 0.99999234
+    },
+    "4": {
+      "max_abs_error": 0.01847,
+      "mean_abs_error": 0.001963,
+      "rmse": 0.002577,
+      "max_rel_error": 0.00406,
+      "rel_l2_error": 0.00414,
+      "cosine_similarity": 0.999991431
+    },
+    "16": {
+      "max_abs_error": 0.0489,
+      "mean_abs_error": 0.00468,
+      "rmse": 0.006146,
+      "max_rel_error": 0.0107,
+      "rel_l2_error": 0.00996,
+      "cosine_similarity": 0.999950439
+    }
+  },
+  "repeatability": "bit-exact on repeated calls",
+  "tests": {
+    "test_q3_q4_linear": "PASS"
+  }
+}
