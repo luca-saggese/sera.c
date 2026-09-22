@@ -1,0 +1,17 @@
+# Model artifacts (stay outside the repository)
+models/
+*.gguf
+
+# Local donor clone (reference only)
+_reference/
+
+# Build outputs
+build/
+*.o
+*.so
+*.a
+/q3
+/q3
+tests/test_q3_gguf
+tests/test_q3_residency_plan
+tests/fixtures/*.bin
