@@ -15,3 +15,6 @@ build/
 tests/test_q3_gguf
 tests/test_q3_residency_plan
 tests/fixtures/*.bin
+
+# M1 test binaries
+tests/test_q3_q4_linear

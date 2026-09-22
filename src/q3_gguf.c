@@ -299,6 +299,12 @@ static void parse_tensors(q3_gguf *m, q3_cursor *c) {
     for (uint64_t i = 0; i < m->n_tensors; i++) {
         q3_tensor *t = &m->tensors[i];
         if (!cursor_string(c, &t->name)) return;
+        {
+            const uint64_t n = t->name.len < Q3_MAX_NAME - 1
+                                   ? t->name.len : Q3_MAX_NAME - 1;
+            memcpy(t->name_buf, t->name.ptr, (size_t) n);
+            t->name_buf[n] = '\0';
+        }
         if (!cursor_u32(c, &t->ndim)) return;
         if (t->ndim == 0 || t->ndim > Q3_MAX_DIMS) {
             cursor_error(c, "tensor has an unsupported number of dimensions");

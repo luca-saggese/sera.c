@@ -18,6 +18,8 @@ NVCC ?= $(CUDA_HOME)/bin/nvcc
 NVCC_ARCH_FLAGS := -gencode arch=compute_121a,code=sm_121a
 NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math -Isrc $(NVCC_ARCH_FLAGS)
 NVCCFLAGS += -DQ3_DIAGNOSTICS=1
+# The vendored Q4_K compute closure is C++17 and uses ggml-style headers.
+NVCC_VENDOR_FLAGS := -std=c++17 -Icuda/vendor -Icuda -Xcompiler -Wno-unused-parameter
 CUDA_LDLIBS ?= -L$(CUDA_HOME)/targets/sbsa-linux/lib -L$(CUDA_HOME)/lib64 -lcudart -Xcompiler -pthread
 
 BIN := q3
@@ -31,14 +33,24 @@ C_OBJS := \
 	src/q3_main.o
 
 CUDA_OBJS := \
+	src/q3_quant.o \
 	cuda/q3_cuda.o \
-	cuda/q3_model_loader_cuda.o
+	cuda/q3_model_loader_cuda.o \
+	cuda/q3_cuda_primitives.o \
+	cuda/q3_mmq.o \
+	cuda/q3_q4_linear.o
 
-OBJS := $(C_OBJS) $(CUDA_OBJS)
+# Vendored donor compute closure (COPY -> RENAME -> EDIT from q38.c @ main).
+VENDOR_OBJS := \
+	cuda/vendor/q3_ggml_stubs.o \
+	cuda/vendor/quantize.o \
+	cuda/vendor/mmvq.o
 
-TESTS := tests/test_q3_gguf tests/test_q3_residency_plan
+OBJS := $(C_OBJS) $(CUDA_OBJS) $(VENDOR_OBJS)
 
-.PHONY: all clean test test-gguf test-plan
+TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear
+
+.PHONY: all clean test test-gguf test-plan test-q4-linear
 
 all: $(BIN)
 
@@ -48,14 +60,34 @@ $(BIN): $(OBJS)
 src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+cuda/%.o: src/%.cu
+	$(NVCC) $(NVCCFLAGS) $(NVCC_VENDOR_FLAGS) -c $< -o $@
+
 cuda/%.o: cuda/%.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+
+cuda/q3_mmq.o: cuda/q3_mmq.cu
+	$(NVCC) $(NVCCFLAGS) $(NVCC_VENDOR_FLAGS) -c $< -o $@
+
+src/q3_quant.o: src/q3_quant.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+cuda/q3_q4_linear.o: src/q3_q4_linear.cu
+	$(NVCC) $(NVCCFLAGS) $(NVCC_VENDOR_FLAGS) -c $< -o $@
+
+cuda/vendor/%.o: cuda/vendor/%.cu
+	$(NVCC) $(NVCCFLAGS) $(NVCC_VENDOR_FLAGS) -c $< -o $@
 
 tests/test_q3_gguf: tests/test_q3_gguf.c src/q3_gguf.o
 	$(CC) $(CFLAGS) -o $@ $< src/q3_gguf.o
 
 tests/test_q3_residency_plan: tests/test_q3_residency_plan.c src/q3_residency_plan.o
 	$(CC) $(CFLAGS) -o $@ $< src/q3_residency_plan.o
+
+TEST_Q4_OBJS := $(filter-out src/q3_main.o,$(OBJS))
+
+tests/test_q3_q4_linear: tests/test_q3_q4_linear.cu $(TEST_Q4_OBJS)
+	$(NVCC) $(NVCCFLAGS) $(NVCC_VENDOR_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
 
 test-gguf: tests/test_q3_gguf
 	mkdir -p tests/fixtures
@@ -64,7 +96,10 @@ test-gguf: tests/test_q3_gguf
 test-plan: tests/test_q3_residency_plan
 	./tests/test_q3_residency_plan
 
-test: test-gguf test-plan
+test-q4-linear: tests/test_q3_q4_linear
+	./tests/test_q3_q4_linear
+
+test: test-gguf test-plan test-q4-linear
 
 clean:
 	rm -f $(OBJS) $(BIN) $(TESTS)

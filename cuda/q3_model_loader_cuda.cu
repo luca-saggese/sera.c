@@ -226,7 +226,7 @@ bool q3_loader_load(q3_loader_context *context, const q3_gguf *model,
         entry->qtype = tensor->type;
         entry->tensor_id = (uint32_t)i;
         entry->gguf_offset = tensor->abs_offset;
-        entry->name = tensor->name.ptr;
+        entry->name = tensor->name_buf;
     }
 
     /* --- final resident allocations (one per planned tensor) ---------- */

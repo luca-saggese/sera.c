@@ -21,6 +21,7 @@ extern "C" {
 
 #define Q3_GGUF_MAGIC 0x46554747u /* "GGUF", little endian */
 #define Q3_MAX_DIMS   8
+#define Q3_MAX_NAME   128
 
 typedef struct {
     const char *ptr;
@@ -37,6 +38,10 @@ typedef struct {
 
 typedef struct {
     q3_str name;
+    /* NUL-terminated copy of name. The mmap'd bytes are not terminated, so
+     * callers that need a C string (resident descriptor table, list-tensors)
+     * use this instead of name.ptr. */
+    char name_buf[Q3_MAX_NAME];
     uint32_t ndim;
     uint64_t dim[Q3_MAX_DIMS];
     uint32_t type;
