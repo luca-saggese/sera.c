@@ -146,6 +146,22 @@ int main(void) {
         CHECK(t->elements == 4, "tensor elements == 4");
         CHECK(t->bytes == 16, "tensor bytes == 16");
         CHECK(strcmp(q3_gguf_type_name(t->type), "f32") == 0, "type name f32");
+        CHECK(t->ndim == 1 && t->dim[0] == 4, "tensor shape [4]");
+        CHECK(t->rel_offset == 0, "tensor rel_offset == 0");
+        CHECK(m->tensor_data_pos == m->alignment * ((m->tensor_data_pos +
+                                                   m->alignment - 1) /
+                                                  m->alignment),
+              "tensor data is aligned");
+        CHECK(t->abs_offset == m->tensor_data_pos + t->rel_offset,
+              "abs_offset == data_pos + rel_offset");
+        CHECK(t->abs_offset + t->bytes <= m->size,
+              "tensor bytes are within file bounds");
+        CHECK(q3_gguf_tensor_data(m, t) == m->map + t->abs_offset,
+              "tensor_data points into the mmap at abs_offset");
+
+        uint64_t nbytes = 0;
+        CHECK(q3_gguf_type_nbytes(0, 4, &nbytes) && nbytes == 16,
+              "type_nbytes(f32, 4) == 16");
 
         q3_gguf_close(m);
     }

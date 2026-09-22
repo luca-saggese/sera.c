@@ -31,7 +31,8 @@ C_OBJS := \
 	src/q3_main.o
 
 CUDA_OBJS := \
-	cuda/q3_cuda.o
+	cuda/q3_cuda.o \
+	cuda/q3_model_loader_cuda.o
 
 OBJS := $(C_OBJS) $(CUDA_OBJS)
 
@@ -57,6 +58,7 @@ tests/test_q3_residency_plan: tests/test_q3_residency_plan.c src/q3_residency_pl
 	$(CC) $(CFLAGS) -o $@ $< src/q3_residency_plan.o
 
 test-gguf: tests/test_q3_gguf
+	mkdir -p tests/fixtures
 	./tests/test_q3_gguf
 
 test-plan: tests/test_q3_residency_plan

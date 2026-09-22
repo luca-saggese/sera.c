@@ -11,11 +11,15 @@
 #include "q3_memory.h"
 #include "q3_platform.h"
 #include "q3_residency_plan.h"
+#include "q3_model_loader_cuda.h"
 
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
+#include <time.h>
+#include <unistd.h>
 
 static void usage(FILE *fp) {
     fprintf(fp,
@@ -227,12 +231,95 @@ static int cmd_list_tensors(const q3_options *opt) {
     return 0;
 }
 
+/* M0 dense Qwen3 residency plan: every tensor with a known physical size is
+ * resident. There are no PLE banks, no experts and no special banks. */
+static bool plan_exclude_none(const q3_tensor *tensor, void *user) {
+    (void)tensor;
+    (void)user;
+    return false;
+}
+
+#define Q3_PLAN_MAX_GAP_BYTES   (64ull * 1024ull)
+#define Q3_PLAN_MAX_SPAN_BYTES  (256ull * 1024ull * 1024ull)
+
+static bool plan_validate(const q3_residency_plan *plan, char *err,
+                          size_t err_len) {
+    uint64_t total = 0;
+    for (size_t i = 0; i < plan->entry_count; i++) {
+        const q3_residency_plan_entry *e = &plan->entries[i];
+        if (i && e->file_offset < plan->entries[i - 1].file_offset) {
+            snprintf(err, err_len, "entries not in ascending offset order");
+            return false;
+        }
+        if (e->bytes > UINT64_MAX - e->file_offset) {
+            snprintf(err, err_len, "entry offset overflow");
+            return false;
+        }
+        if (total > UINT64_MAX - e->bytes) {
+            snprintf(err, err_len, "entry byte total overflow");
+            return false;
+        }
+        total += e->bytes;
+    }
+    if (total != plan->resident_bytes) {
+        snprintf(err, err_len, "resident byte total mismatch");
+        return false;
+    }
+    for (size_t s = 0; s < plan->span_count; s++) {
+        const q3_residency_plan_span *sp = &plan->spans[s];
+        if (sp->bytes > UINT64_MAX - sp->file_offset) {
+            snprintf(err, err_len, "span offset overflow");
+            return false;
+        }
+        for (size_t k = 0; k < sp->entry_count; k++) {
+            const q3_residency_plan_entry *e = &plan->entries[sp->first_entry + k];
+            if (e->file_offset < sp->file_offset ||
+                e->file_offset + e->bytes > sp->file_offset + sp->bytes) {
+                snprintf(err, err_len, "entry %zu outside its span", sp->first_entry + k);
+                return false;
+            }
+        }
+    }
+    for (size_t s = 1; s < plan->span_count; s++) {
+        const q3_residency_plan_span *prev = &plan->spans[s - 1];
+        if (plan->spans[s].file_offset < prev->file_offset + prev->bytes) {
+            snprintf(err, err_len, "span %zu overlaps previous span", s);
+            return false;
+        }
+    }
+    return true;
+}
+
 static int cmd_memory_plan(const q3_options *opt) {
     char err[256];
     q3_gguf *m = q3_gguf_open(opt->model_path, err, sizeof(err));
     if (!m) {
         fprintf(stderr, "q3: %s\n", err);
         return 1;
+    }
+
+    q3_residency_plan plan;
+    q3_residency_plan_init(&plan);
+    if (!q3_residency_plan_build(m, plan_exclude_none, NULL,
+                                 Q3_PLAN_MAX_GAP_BYTES, Q3_PLAN_MAX_SPAN_BYTES,
+                                 &plan, err, sizeof(err))) {
+        fprintf(stderr, "q3: residency plan: %s\n", err);
+        q3_gguf_close(m);
+        return 1;
+    }
+
+    char perr[256] = {0};
+    if (!plan_validate(&plan, perr, sizeof(perr))) {
+        fprintf(stderr, "q3: residency plan invalid: %s\n", perr);
+        q3_residency_plan_destroy(&plan);
+        q3_gguf_close(m);
+        return 1;
+    }
+
+    uint64_t span_bytes = 0, largest_span = 0;
+    for (size_t s = 0; s < plan.span_count; s++) {
+        span_bytes += plan.spans[s].bytes;
+        if (plan.spans[s].bytes > largest_span) largest_span = plan.spans[s].bytes;
     }
 
     q3_memory_tracker tracker;
@@ -252,9 +339,19 @@ static int cmd_memory_plan(const q3_options *opt) {
     snap.cuda_free_bytes = cuda_free;
 
     if (opt->json) {
-        char buf[1024];
+        char buf[2048];
         q3_memory_snapshot_json(&snap, buf, sizeof(buf));
-        printf("%s\n", buf);
+        /* splice the plan fields into the snapshot object */
+        size_t len = strlen(buf);
+        if (len && buf[len - 1] == '}') buf[--len] = '\0';
+        printf("%s,\"planned_tensors\":%zu,\"planned_spans\":%zu,"
+               "\"resident_bytes\":%" PRIu64 ",\"excluded_ple_bytes\":%" PRIu64
+               ",\"plan_span_bytes\":%" PRIu64 ",\"plan_largest_span_bytes\":%" PRIu64
+               ",\"max_gap_bytes\":%llu,\"max_span_bytes\":%llu}\n",
+               buf, plan.entry_count, plan.span_count, plan.resident_bytes,
+               plan.excluded_ple_bytes, span_bytes, largest_span,
+               (unsigned long long)Q3_PLAN_MAX_GAP_BYTES,
+               (unsigned long long)Q3_PLAN_MAX_SPAN_BYTES);
     } else {
         printf("model file:        %" PRIu64 " bytes\n", snap.model_file_bytes);
         printf("model mapped:      %" PRIu64 " bytes\n", snap.model_mapped_bytes);
@@ -262,17 +359,175 @@ static int cmd_memory_plan(const q3_options *opt) {
         printf("mem available:     %" PRIu64 " bytes\n", snap.mem_available_bytes);
         printf("cuda free:         %" PRIu64 " bytes\n", snap.cuda_free_bytes);
         printf("cuda total:        %" PRIu64 " bytes\n", snap.cuda_total_bytes);
+        printf("planned tensors:   %zu\n", plan.entry_count);
+        printf("planned spans:     %zu\n", plan.span_count);
+        printf("resident bytes:    %" PRIu64 "\n", plan.resident_bytes);
+        printf("excluded ple bytes:%" PRIu64 "\n", plan.excluded_ple_bytes);
+        printf("span bytes:        %" PRIu64 "\n", span_bytes);
+        printf("largest span:      %" PRIu64 " bytes\n", largest_span);
         printf("peak internal:     %" PRIu64 " bytes\n", snap.peak_internal_bytes);
     }
 
+    q3_residency_plan_destroy(&plan);
     q3_gguf_close(m);
     return 0;
 }
 
+static uint64_t read_rss_bytes(void) {
+    FILE *fp = fopen("/proc/self/statm", "r");
+    if (!fp) return 0;
+    unsigned long total = 0, resident = 0;
+    if (fscanf(fp, "%lu %lu", &total, &resident) != 2) resident = 0;
+    fclose(fp);
+    return (uint64_t)resident * (uint64_t)sysconf(_SC_PAGESIZE);
+}
+
+static uint64_t read_peak_rss_bytes(void) {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0;
+    return (uint64_t)usage.ru_maxrss * 1024u;
+}
+
+static uint64_t read_mem_available_bytes(void) {
+    FILE *fp = fopen("/proc/meminfo", "r");
+    if (!fp) return 0;
+    char line[256];
+    uint64_t kb = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "MemAvailable: %" SCNu64 " kB", &kb) == 1) break;
+    }
+    fclose(fp);
+    return kb * 1024u;
+}
+
+static void emit_load_json(const q3_load_stats *s, double gguf_open_ms,
+                           uint64_t model_bytes, uint64_t rss,
+                           uint64_t peak_rss, uint64_t mem_avail,
+                           uint64_t cuda_free_before, uint64_t cuda_free_after) {
+    printf("{");
+    printf("\"gguf_open_ms\":%.3f,", gguf_open_ms);
+    printf("\"plan_ms\":%.3f,", s->plan_ms);
+    printf("\"cuda_alloc_ms\":%.3f,", s->cuda_alloc_ms);
+    printf("\"source_copy_ms\":%.3f,", s->source_copy_ms);
+    printf("\"h2d_enqueue_ms\":%.3f,", s->h2d_enqueue_ms);
+    printf("\"d2d_enqueue_ms\":%.3f,", s->d2d_enqueue_ms);
+    printf("\"final_wait_ms\":%.3f,", s->final_wait_ms);
+    printf("\"total_load_ms\":%.3f,", s->total_ms);
+    printf("\"model_file_bytes\":%" PRIu64 ",", model_bytes);
+    printf("\"planned_bytes\":%" PRIu64 ",", s->planned_bytes);
+    printf("\"planned_spans\":%" PRIu64 ",", s->planned_spans);
+    printf("\"resident_tensors\":%" PRIu64 ",", s->resident_tensors);
+    printf("\"resident_bytes\":%" PRIu64 ",", s->resident_bytes);
+    printf("\"staging_bytes\":%" PRIu64 ",", s->staging_bytes);
+    printf("\"staged_bytes\":%" PRIu64 ",", s->staged_bytes);
+    printf("\"h2d_bytes\":%" PRIu64 ",", s->h2d_bytes);
+    printf("\"transfer_calls\":%" PRIu64 ",", s->transfer_calls);
+    printf("\"device_copies\":%" PRIu64 ",", s->device_copies);
+    printf("\"cuda_allocations\":%" PRIu64 ",", s->cuda_allocations);
+    printf("\"cuda_allocated_bytes\":%" PRIu64 ",", s->cuda_allocated_bytes);
+    printf("\"final_syncs\":%" PRIu64 ",", s->final_syncs);
+    printf("\"device_syncs\":%" PRIu64 ",", s->device_syncs);
+    printf("\"minor_faults_before\":%" PRIu64 ",", s->minor_faults_before);
+    printf("\"minor_faults_after\":%" PRIu64 ",", s->minor_faults_after);
+    printf("\"major_faults_before\":%" PRIu64 ",", s->major_faults_before);
+    printf("\"major_faults_after\":%" PRIu64 ",", s->major_faults_after);
+    printf("\"mincore_pages_before\":%" PRIu64 ",", s->mincore_pages_before);
+    printf("\"mincore_pages_after\":%" PRIu64 ",", s->mincore_pages_after);
+    printf("\"rss_bytes\":%" PRIu64 ",", rss);
+    printf("\"peak_rss_bytes\":%" PRIu64 ",", peak_rss);
+    printf("\"mem_available_bytes\":%" PRIu64 ",", mem_avail);
+    printf("\"cuda_free_before\":%" PRIu64 ",", cuda_free_before);
+    printf("\"cuda_free_after\":%" PRIu64 ",", cuda_free_after);
+    printf("\"coverage_ok\":%s", s->coverage_ok ? "true" : "false");
+    printf("}\n");
+}
+
+static double mono_ms(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) != 0) return 0.0;
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1000000.0;
+}
+
 static int cmd_load_only(const q3_options *opt) {
-    (void)opt;
-    fprintf(stderr, "q3: --load-only is not implemented yet\n");
-    return 1;
+    char err[256];
+    const double open_started = mono_ms();
+    q3_gguf *m = q3_gguf_open(opt->model_path, err, sizeof(err));
+    const double gguf_open_ms = mono_ms() - open_started;
+    if (!m) {
+        fprintf(stderr, "q3: %s\n", err);
+        return 1;
+    }
+
+    q3_platform_info before = {0}, after = {0};
+    char reason[256] = {0};
+    if (q3_platform_probe(&before, reason, sizeof(reason)) != 0) {
+        fprintf(stderr, "q3: %s\n", reason);
+        q3_gguf_close(m);
+        return 1;
+    }
+    if (q3_cuda_init() != 0) {
+        fprintf(stderr, "q3: CUDA initialization failed\n");
+        q3_gguf_close(m);
+        return 1;
+    }
+
+    q3_loader_context *context =
+        q3_loader_context_create(err, sizeof(err));
+    if (!context) {
+        fprintf(stderr, "q3: %s\n", err);
+        q3_gguf_close(m);
+        return 1;
+    }
+
+    if (!q3_loader_load(context, m, err, sizeof(err))) {
+        fprintf(stderr, "q3: %s\n", err);
+        q3_loader_context_destroy(context);
+        q3_gguf_close(m);
+        return 1;
+    }
+
+    (void)q3_platform_probe(&after, reason, sizeof(reason));
+
+    q3_load_stats stats;
+    q3_loader_get_stats(context, &stats);
+    const uint64_t rss = read_rss_bytes();
+    const uint64_t peak_rss = read_peak_rss_bytes();
+    const uint64_t mem_avail = read_mem_available_bytes();
+
+    if (opt->json) {
+        emit_load_json(&stats, gguf_open_ms, m->size, rss, peak_rss,
+                       mem_avail, before.cuda_free_bytes,
+                       after.cuda_free_bytes);
+    } else {
+        printf("model file:        %" PRIu64 " bytes\n", m->size);
+        printf("planned bytes:     %" PRIu64 "\n", stats.planned_bytes);
+        printf("planned spans:     %" PRIu64 "\n", stats.planned_spans);
+        printf("resident tensors:  %" PRIu64 "\n", stats.resident_tensors);
+        printf("resident bytes:    %" PRIu64 "\n", stats.resident_bytes);
+        printf("staging bytes:     %" PRIu64 "\n", stats.staging_bytes);
+        printf("h2d bytes:         %" PRIu64 "\n", stats.h2d_bytes);
+        printf("transfer calls:    %" PRIu64 "\n", stats.transfer_calls);
+        printf("device copies:     %" PRIu64 "\n", stats.device_copies);
+        printf("cuda allocations:  %" PRIu64 "\n", stats.cuda_allocations);
+        printf("final syncs:       %" PRIu64 "\n", stats.final_syncs);
+        printf("device syncs:      %" PRIu64 "\n", stats.device_syncs);
+        printf("plan:              %.3f ms\n", stats.plan_ms);
+        printf("cuda alloc:        %.3f ms\n", stats.cuda_alloc_ms);
+        printf("source copy:       %.3f ms\n", stats.source_copy_ms);
+        printf("h2d enqueue:       %.3f ms\n", stats.h2d_enqueue_ms);
+        printf("d2d enqueue:       %.3f ms\n", stats.d2d_enqueue_ms);
+        printf("final wait:        %.3f ms\n", stats.final_wait_ms);
+        printf("total load:        %.3f ms\n", stats.total_ms);
+        printf("rss:               %" PRIu64 " bytes\n", rss);
+        printf("peak rss:          %" PRIu64 " bytes\n", peak_rss);
+        printf("mem available:     %" PRIu64 " bytes\n", mem_avail);
+        printf("cuda free before:  %" PRIu64 "\n", before.cuda_free_bytes);
+        printf("cuda free after:   %" PRIu64 "\n", after.cuda_free_bytes);
+    }
+
+    q3_loader_context_destroy(context);
+    q3_gguf_close(m);
+    return stats.coverage_ok ? 0 : 1;
 }
 
 int main(int argc, char **argv) {
