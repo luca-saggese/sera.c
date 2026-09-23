@@ -1,0 +1,114 @@
+{
+ "q": 8,
+ "requests": 10,
+ "state_chars": 515,
+ "state_tokens": 0,
+ "suffix_tokens_total": 0,
+ "http_status": [
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200
+ ],
+ "latency_ms": [
+  1962.6280079828575,
+  1930.1374719943851,
+  2015.032880997751,
+  2014.3265909864567,
+  1956.2962420168333,
+  1972.053419041913,
+  1939.42196900025,
+  1859.2946940334514,
+  1867.4456250155345,
+  1861.533445015084
+ ],
+ "p50_ms": 1939.42196900025,
+ "p95_ms": 2015.032880997751,
+ "mean_ms": 1937.8170346084516,
+ "min_ms": 1859.2946940334514,
+ "max_ms": 2015.032880997751,
+ "questions_per_s": 4.12835673189159,
+ "e2e_ms_per_question": 242.22712932605646,
+ "breakdown_median_ms": null,
+ "server_overhead_ms": null,
+ "server_overhead_percent": null,
+ "amortized_prefix_ms_per_question": null,
+ "kv": null,
+ "gpu_memory": {
+  "after_load_bytes": null,
+  "after_first_request_bytes": null,
+  "peak_bytes": null
+ },
+ "accuracy": {
+  "matches": 40,
+  "total": 80
+ },
+ "raw": [
+  {
+   "i": 0,
+   "status": 200,
+   "latency_ms": 1962.6280079828575,
+   "stats": null
+  },
+  {
+   "i": 1,
+   "status": 200,
+   "latency_ms": 1930.1374719943851,
+   "stats": null
+  },
+  {
+   "i": 2,
+   "status": 200,
+   "latency_ms": 2015.032880997751,
+   "stats": null
+  },
+  {
+   "i": 3,
+   "status": 200,
+   "latency_ms": 2014.3265909864567,
+   "stats": null
+  },
+  {
+   "i": 4,
+   "status": 200,
+   "latency_ms": 1956.2962420168333,
+   "stats": null
+  },
+  {
+   "i": 5,
+   "status": 200,
+   "latency_ms": 1972.053419041913,
+   "stats": null
+  },
+  {
+   "i": 6,
+   "status": 200,
+   "latency_ms": 1939.42196900025,
+   "stats": null
+  },
+  {
+   "i": 7,
+   "status": 200,
+   "latency_ms": 1859.2946940334514,
+   "stats": null
+  },
+  {
+   "i": 8,
+   "status": 200,
+   "latency_ms": 1867.4456250155345,
+   "stats": null
+  },
+  {
+   "i": 9,
+   "status": 200,
+   "latency_ms": 1861.533445015084,
+   "stats": null
+  }
+ ]
+}

@@ -1,0 +1,53 @@
+{
+ "clients": 4,
+ "questions_per_request": 1,
+ "wall_ms": 6651.708615012467,
+ "all_status_200": true,
+ "requests": [
+  {
+   "i": 3,
+   "status": 200,
+   "latency_ms": 1577.6129700243473,
+   "queue_wait_ms": null,
+   "choice": "black",
+   "expected": "gray",
+   "correct": false
+  },
+  {
+   "i": 2,
+   "status": 200,
+   "latency_ms": 3341.2311280262657,
+   "queue_wait_ms": null,
+   "choice": "black",
+   "expected": "gray",
+   "correct": false
+  },
+  {
+   "i": 1,
+   "status": 200,
+   "latency_ms": 5055.848461051937,
+   "queue_wait_ms": null,
+   "choice": "black",
+   "expected": "gray",
+   "correct": false
+  },
+  {
+   "i": 0,
+   "status": 200,
+   "latency_ms": 6648.717230011243,
+   "queue_wait_ms": null,
+   "choice": "black",
+   "expected": "gray",
+   "correct": false
+  }
+ ],
+ "queue_wait_ms": {
+  "min": null,
+  "p50": null,
+  "max": null
+ },
+ "distinct_choices": [
+  "black"
+ ],
+ "correct": false
+}

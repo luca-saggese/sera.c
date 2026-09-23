@@ -1,0 +1,327 @@
+{
+ "name": "m4-bench-systemone",
+ "model": "q3-local",
+ "state": "The machine is ALPHA. The cat is gray. The horse is black. The car is red. The robot is a machine. The machine BETA is a machine. The cat is grey because the light is dim, but the cat is gray. The code is ALPHA. The robot is the machine. The machine is the robot. Yesterday the code was BETA; today the code is ALPHA. The policy covers repairs of red cars. The policy does not cover machines. The policy covers the cat if it is a pet. Alice is the owner. Alice owns the cat. The owner will be paid. The mark is XQZ.",
+ "questions": {
+  "q01": {
+   "type": "choice",
+   "instructions": "What is the color of the cat?",
+   "criteria": {
+    "gray": "gray",
+    "black": "black",
+    "red": "red"
+   },
+   "expected": 0
+  },
+  "q02": {
+   "type": "choice",
+   "instructions": "The robot is a machine, and the machine is ALPHA. What is the robot?",
+   "criteria": {
+    "ALPHA": "ALPHA",
+    "BETA": "BETA",
+    "gray": "gray"
+   },
+   "expected": 0
+  },
+  "q03": {
+   "type": "choice",
+   "instructions": "The car is not gray. What is the car?",
+   "criteria": {
+    "gray": "gray",
+    "red": "red",
+    "black": "black"
+   },
+   "expected": 1
+  },
+  "q04": {
+   "type": "choice",
+   "instructions": "The robot is a machine, and the machine is ALPHA. What is the robot?",
+   "criteria": {
+    "ALPHA": "ALPHA",
+    "unknown": "unknown",
+    "BETA": "BETA"
+   },
+   "expected": 0
+  },
+  "q05": {
+   "type": "choice",
+   "instructions": "What is the color of the horse?",
+   "criteria": {
+    "black": "black",
+    "gray": "gray",
+    "red": "red"
+   },
+   "expected": 0
+  },
+  "q06": {
+   "type": "choice",
+   "instructions": "Alice owns the cat. The cat is gray. What does Alice own?",
+   "criteria": {
+    "a gray cat": "a gray cat",
+    "a black horse": "a black horse",
+    "a red car": "a red car"
+   },
+   "expected": 0
+  },
+  "q07": {
+   "type": "choice",
+   "instructions": "Today the code is ALPHA. What was the code yesterday?",
+   "criteria": {
+    "ALPHA": "ALPHA",
+    "BETA": "BETA",
+    "red": "red"
+   },
+   "expected": 1
+  },
+  "q08": {
+   "type": "choice",
+   "instructions": "Alice owns the cat. The cat is gray. What color is Alice's pet?",
+   "criteria": {
+    "gray": "gray",
+    "black": "black",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q09": {
+   "type": "choice",
+   "instructions": "What is the color of the car?",
+   "criteria": {
+    "red": "red",
+    "gray": "gray",
+    "black": "black"
+   },
+   "expected": 0
+  },
+  "q10": {
+   "type": "choice",
+   "instructions": "The policy does not cover machines. The cat is not a machine. Is the cat covered?",
+   "criteria": {
+    "yes": "yes",
+    "no": "no",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q11": {
+   "type": "choice",
+   "instructions": "The owner will be paid. Who is the owner?",
+   "criteria": {
+    "Alice": "Alice",
+    "the cat": "the cat",
+    "the machine": "the machine"
+   },
+   "expected": 0
+  },
+  "q12": {
+   "type": "choice",
+   "instructions": "The machine is ALPHA. Is the machine BETA?",
+   "criteria": {
+    "no": "no",
+    "yes": "yes",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q13": {
+   "type": "choice",
+   "instructions": "In state ALPHA, is the car red?",
+   "criteria": {
+    "yes": "yes",
+    "no": "no",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q14": {
+   "type": "choice",
+   "instructions": "The horse is not gray. What is the horse?",
+   "criteria": {
+    "black": "black",
+    "gray": "gray",
+    "red": "red"
+   },
+   "expected": 0
+  },
+  "q15": {
+   "type": "choice",
+   "instructions": "The policy covers repairs of red cars. Is a red car repair covered?",
+   "criteria": {
+    "yes": "yes",
+    "no": "no",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q16": {
+   "type": "choice",
+   "instructions": "Di che colore è il gatto?",
+   "criteria": {
+    "grigio": "grigio",
+    "nero": "nero",
+    "rosso": "rosso"
+   },
+   "expected": 0
+  },
+  "q17": {
+   "type": "choice",
+   "instructions": "The machine is ALPHA. The code is ALPHA. What is shared by machine and code?",
+   "criteria": {
+    "ALPHA": "ALPHA",
+    "BETA": "BETA",
+    "gray": "gray"
+   },
+   "expected": 0
+  },
+  "q18": {
+   "type": "choice",
+   "instructions": "The policy does not cover machines. Is a machine covered?",
+   "criteria": {
+    "no": "no",
+    "yes": "yes",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q19": {
+   "type": "choice",
+   "instructions": "A red car needs repair. How is the claim handled?",
+   "criteria": {
+    "covered by policy": "covered by policy",
+    "not covered": "not covered",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q20": {
+   "type": "choice",
+   "instructions": "A machine needs repair. How is the claim handled?",
+   "criteria": {
+    "not covered": "not covered",
+    "covered by policy": "covered by policy",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q21": {
+   "type": "choice",
+   "instructions": "What is the color of the zebra?",
+   "criteria": {
+    "unknown": "unknown",
+    "gray": "gray",
+    "black": "black"
+   },
+   "expected": 0
+  },
+  "q22": {
+   "type": "choice",
+   "instructions": "What is XQZ?",
+   "criteria": {
+    "unknown": "unknown",
+    "gray": "gray",
+    "ALPHA": "ALPHA"
+   },
+   "expected": 0
+  },
+  "q23": {
+   "type": "choice",
+   "instructions": "What is the color of the elephant?",
+   "criteria": {
+    "unknown": "unknown",
+    "red": "red",
+    "black": "black"
+   },
+   "expected": 0
+  },
+  "q24": {
+   "type": "choice",
+   "instructions": "What is the weight of the cat?",
+   "criteria": {
+    "unknown": "unknown",
+    "gray": "gray",
+    "light": "light"
+   },
+   "expected": 0
+  },
+  "q25": {
+   "type": "choice",
+   "instructions": "What is the height of the horse?",
+   "criteria": {
+    "unknown": "unknown",
+    "black": "black",
+    "tall": "tall"
+   },
+   "expected": 0
+  },
+  "q26": {
+   "type": "choice",
+   "instructions": "Di che colore è il cavallo?",
+   "criteria": {
+    "nero": "nero",
+    "grigio": "grigio",
+    "rosso": "rosso"
+   },
+   "expected": 0
+  },
+  "q27": {
+   "type": "choice",
+   "instructions": "The robot is the machine, and the machine is the robot. Is the robot the machine?",
+   "criteria": {
+    "yes": "yes",
+    "no": "no",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q28": {
+   "type": "choice",
+   "instructions": "The cat is not black. What is the cat?",
+   "criteria": {
+    "gray": "gray",
+    "black": "black",
+    "red": "red"
+   },
+   "expected": 0
+  },
+  "q29": {
+   "type": "choice",
+   "instructions": "The cat is a pet. How is the cat claimed?",
+   "criteria": {
+    "covered by policy": "covered by policy",
+    "not covered": "not covered",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q30": {
+   "type": "choice",
+   "instructions": "Alice owns the cat, and the owner will be paid. What will happen to Alice?",
+   "criteria": {
+    "paid": "paid",
+    "unpaid": "unpaid",
+    "unknown": "unknown"
+   },
+   "expected": 0
+  },
+  "q31": {
+   "type": "choice",
+   "instructions": "The cat is not gray, but what is its color in the dim light?",
+   "criteria": {
+    "grey": "grey",
+    "gray": "gray",
+    "black": "black"
+   },
+   "expected": 0
+  },
+  "q32": {
+   "type": "choice",
+   "instructions": "The robot is a machine, and the machine is ALPHA. What is the code?",
+   "criteria": {
+    "ALPHA": "ALPHA",
+    "BETA": "BETA",
+    "machine": "machine"
+   },
+   "expected": 0
+  }
+ }
+}

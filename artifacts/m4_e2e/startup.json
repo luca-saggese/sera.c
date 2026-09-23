@@ -1,0 +1,22 @@
+{
+ "commit": "be9b1e5cb1788b610e4f3ed524c4a51173d08b81",
+ "model": "models/Qwen3-32B-Q4_K_M.gguf",
+ "model_file_bytes": 19762149024,
+ "gpu": "NVIDIA GB10 (sm_121a)",
+ "server_cmd": [
+  "build/q3-server",
+  "--model",
+  "models/Qwen3-32B-Q4_K_M.gguf",
+  "--port",
+  "8011"
+ ],
+ "process_start_to_health_ms": 47.60885238647461,
+ "gguf_open_ms": null,
+ "residency_load_ms": null,
+ "runtime_workspace_init_ms": null,
+ "server_ready_ms": null,
+ "resident_model_bytes": null,
+ "gpu_memory_after_load_bytes": null,
+ "first_request_ms": null,
+ "first_request_breakdown_ms": null
+}

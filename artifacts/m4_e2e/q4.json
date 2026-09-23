@@ -1,0 +1,114 @@
+{
+ "q": 4,
+ "requests": 10,
+ "state_chars": 515,
+ "state_tokens": 0,
+ "suffix_tokens_total": 0,
+ "http_status": [
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200,
+  200
+ ],
+ "latency_ms": [
+  1565.7706999918446,
+  1615.6116859638132,
+  1696.9763719826005,
+  1632.6639599865302,
+  1626.2949620140716,
+  1764.9560879799537,
+  1565.2896229876205,
+  1617.1751290094107,
+  1560.6364629929885,
+  1620.1582290232182
+ ],
+ "p50_ms": 1617.1751290094107,
+ "p95_ms": 1764.9560879799537,
+ "mean_ms": 1626.5533211932052,
+ "min_ms": 1560.6364629929885,
+ "max_ms": 1764.9560879799537,
+ "questions_per_s": 2.459187748647357,
+ "e2e_ms_per_question": 406.6383302983013,
+ "breakdown_median_ms": null,
+ "server_overhead_ms": null,
+ "server_overhead_percent": null,
+ "amortized_prefix_ms_per_question": null,
+ "kv": null,
+ "gpu_memory": {
+  "after_load_bytes": null,
+  "after_first_request_bytes": null,
+  "peak_bytes": null
+ },
+ "accuracy": {
+  "matches": 10,
+  "total": 40
+ },
+ "raw": [
+  {
+   "i": 0,
+   "status": 200,
+   "latency_ms": 1565.7706999918446,
+   "stats": null
+  },
+  {
+   "i": 1,
+   "status": 200,
+   "latency_ms": 1615.6116859638132,
+   "stats": null
+  },
+  {
+   "i": 2,
+   "status": 200,
+   "latency_ms": 1696.9763719826005,
+   "stats": null
+  },
+  {
+   "i": 3,
+   "status": 200,
+   "latency_ms": 1632.6639599865302,
+   "stats": null
+  },
+  {
+   "i": 4,
+   "status": 200,
+   "latency_ms": 1626.2949620140716,
+   "stats": null
+  },
+  {
+   "i": 5,
+   "status": 200,
+   "latency_ms": 1764.9560879799537,
+   "stats": null
+  },
+  {
+   "i": 6,
+   "status": 200,
+   "latency_ms": 1565.2896229876205,
+   "stats": null
+  },
+  {
+   "i": 7,
+   "status": 200,
+   "latency_ms": 1617.1751290094107,
+   "stats": null
+  },
+  {
+   "i": 8,
+   "status": 200,
+   "latency_ms": 1560.6364629929885,
+   "stats": null
+  },
+  {
+   "i": 9,
+   "status": 200,
+   "latency_ms": 1620.1582290232182,
+   "stats": null
+  }
+ ]
+}
