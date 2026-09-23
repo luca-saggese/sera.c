@@ -1,0 +1,22 @@
+{
+  "batch": 1,
+  "suffix_tokens_total": 8,
+  "prefix_prefill_ms": 743.4293,
+  "branch_create_ms": 0.0014,
+  "suffix_forward_ms": 5.5089,
+  "candidate_head_ms": 0.1143,
+  "warm_total_ms": 455.5473,
+  "warm_ms_per_question": 455.5473,
+  "warm_questions_per_s": 2.1952,
+  "prefix_kv_bytes": 67633152,
+  "expected_prefix_kv_bytes": 67633152,
+  "suffix_kv_bytes": 318767104,
+  "prefix_copy_bytes": 0,
+  "cuda_allocations": 0,
+  "host_syncs": 1,
+  "accuracy": 0,
+  "questions": 1,
+  "prefix_tokens": 129,
+  "prefix_allocations": 2,
+  "canary_branch_isolation": 1
+}

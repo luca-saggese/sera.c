@@ -195,6 +195,103 @@ bool q3_cuda_embedding(float *hidden, const uint32_t *token_ids,
                        uint32_t hidden_size, uint32_t vocab_size, void *stream,
                        char *error, size_t error_len);
 
+/* --- M3 packed multi-branch surface --------------------------------- *
+ * M2's B1 path is untouched: every entry point below is additive. The
+ * logical KV a suffix token attends to is
+ *     [ shared prefix 0..P-1 | own branch suffix 0..lp ]
+ * addressed as two segments with no materialised concatenation and no copy
+ * of the prefix (M3 §11, §12, §14). */
+
+#define Q3_PACK_MAX_BRANCHES 32
+#define Q3_PACK_MAX_CANDIDATES 8
+/* Device staging for the batched candidate head: one row per (branch,
+ * candidate) pair (M3 §26). */
+#define Q3_CANDIDATE_CAPACITY (Q3_PACK_MAX_BRANCHES * Q3_PACK_MAX_CANDIDATES)
+
+/* Everything the packed layer runner needs to address the two KV segments.
+ * Device pointers; the integer arrays are read by the kernels. */
+typedef struct {
+    const uint32_t *token_positions; /* [T] absolute position of each token   */
+    const uint32_t *token_branch;    /* [T] owning branch index               */
+    const uint32_t *token_local_pos; /* [T] position inside the branch suffix */
+    const uint32_t *branch_offsets;  /* [B+1]; branch_offsets[B] == T         */
+    uint32_t branch_count;           /* B                                     */
+
+    const float *prefix_k;           /* [L][prefix_capacity][kv_heads][D]     */
+    const float *prefix_v;
+    uint32_t prefix_len;             /* P: positions 0..P-1                   */
+    uint32_t prefix_capacity;
+
+    float *suffix_k;                 /* [B][L][suffix_capacity][kv_heads][D]  */
+    float *suffix_v;
+    uint32_t suffix_capacity;        /* max suffix tokens per branch          */
+    uint32_t suffix_num_layers;      /* L: per-branch layer stride factor     */
+} q3_pack_view;
+
+/* One packed forward: embedding, L layers with two-segment branch-isolated
+ * attention, final norm, then each branch's last row gathered into
+ * `device_hidden_per_branch` [branch_count][hidden]. Never copies the prefix. */
+bool q3_forward_run_packed(q3_forward_runtime *runtime,
+                           const uint32_t *token_ids_host, uint32_t token_count,
+                           const q3_pack_view *view,
+                           float *device_hidden_per_branch,
+                           q3_forward_stats *stats, char *error, size_t error_len);
+
+/* Selected-row LM head for a whole decision batch in one launch.
+ * `candidate_ids_host` is [branch_count][candidate_count] row-major;
+ * `device_logits` is [branch_count][candidate_count]. */
+bool q3_candidate_logits_batched(q3_forward_runtime *runtime,
+                                 const float *device_hidden_per_branch,
+                                 uint32_t branch_count,
+                                 const uint32_t *candidate_ids_host,
+                                 uint32_t candidate_count, float *device_logits,
+                                 char *error, size_t error_len);
+
+/* RoPE with per-token absolute positions (M3 §13). q3_cuda_rope is the
+ * identity-mapping special case. */
+bool q3_cuda_rope_positions(float *q, float *k, uint32_t tokens,
+                            uint32_t n_heads, uint32_t n_kv_heads,
+                            uint32_t head_dim, const uint32_t *token_positions,
+                            const float *inv_freq, void *stream, char *error,
+                            size_t error_len);
+
+/* Branch-isolated causal GQA attention over [prefix | own suffix].
+ * `suffix_k`/`suffix_v` are the suffix-arena bases; branch b, layer l,
+ * suffix row p sits at
+ *     suffix_k + (b*suffix_num_layers + l)*suffix_capacity*row + p*row. */
+bool q3_cuda_attention_segmented(const float *q, const float *prefix_k,
+                                 const float *prefix_v, uint32_t prefix_len,
+                                 uint32_t prefix_capacity, const float *suffix_k,
+                                 const float *suffix_v, uint32_t suffix_capacity,
+                                 uint32_t suffix_num_layers,
+                                 uint32_t suffix_layer,
+                                 const uint32_t *token_branch,
+                                 const uint32_t *token_local_pos, uint32_t tokens,
+                                 uint32_t n_heads, uint32_t n_kv_heads,
+                                 uint32_t head_dim, float scale, float *out,
+                                 void *stream, char *error, size_t error_len);
+
+/* A q3_kv_cache that borrows slabs it does not own. The prefix prefill uses
+ * this so roped K/V land straight in the immutable prefix storage (M3 §9):
+ * the M2 append path needs no adapter, and the header is discarded once the
+ * prefix is sealed. q3_kv_cache_destroy never frees borrowed slabs. */
+q3_kv_cache *q3_kv_cache_alias(float *k, float *v, uint32_t num_layers,
+                               uint32_t num_kv_heads, uint32_t head_dim,
+                               uint32_t capacity, uint32_t length,
+                               char *error, size_t error_len);
+
+/* Geometry of a runtime, so callers outside this translation unit can size
+ * their own arenas without reaching into the opaque struct. */
+void q3_forward_geometry(const q3_forward_runtime *runtime,
+                         uint32_t *num_layers, uint32_t *hidden_size,
+                         uint32_t *num_heads, uint32_t *num_kv_heads,
+                         uint32_t *head_dim, uint32_t *max_tokens);
+
+/* --- M3 shared-prefix KV and private suffix branches ----------------- *
+ * Declared in q3_decide.h: the prefix is written once by an ordinary M2
+ * forward and then sealed; each branch owns a private suffix slab inside one
+ * arena allocated once (§8-§11). */
+
 #ifdef __cplusplus
 }
 #endif

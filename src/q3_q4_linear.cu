@@ -93,7 +93,15 @@ extern "C" bool q3_q4_linear_bind_geometry(uint32_t qtype,
 extern "C" bool q3_cuda_q4k_linear_init(int device, size_t max_tokens,
                                         int64_t max_features, int64_t max_k,
                                         char *error, size_t error_len) {
-    if (g_initialized && g_device == device) return true;
+    if (g_initialized && g_device == device) {
+        /* The workspace requirement is process-wide, but several runtimes
+         * may coexist (or be created in sequence) with different token
+         * capacities. Never shrink it: a later, smaller runtime must not
+         * invalidate the arena a larger one already reserved. */
+        const size_t needed = q3_mmq_arena_bytes(max_tokens, max_features, max_k);
+        if (needed > g_workspace_bytes) g_workspace_bytes = needed;
+        return true;
+    }
     if (device < 0) {
         set_error(error, error_len, "q3_q4_linear: invalid device index");
         return false;

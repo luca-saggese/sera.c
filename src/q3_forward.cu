@@ -355,6 +355,227 @@ __global__ static void candidate_logits_kernel(const float *hidden,
 }
 
 /* =========================================================================
+ * M3 kernels: per-token RoPE positions, two-segment branch-isolated
+ * attention, per-branch KV scatter, last-row gather, batched LM head.
+ * ========================================================================= */
+
+/* rope_kernel with per-token absolute positions instead of a scalar base
+ * (M3 §13). A packed batch mixes branches whose suffix starts at different
+ * absolute positions, so the position cannot be `base + token`. */
+__global__ static void rope_kernel_positions(float *q, float *k, uint32_t tokens,
+                                             uint32_t n_heads,
+                                             uint32_t n_kv_heads,
+                                             uint32_t head_dim,
+                                             const uint32_t *token_positions,
+                                             const float *inv_freq) {
+    const uint32_t pairs = head_dim / 2;
+    const size_t total = (size_t)tokens * (n_heads + n_kv_heads) * pairs;
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= total) return;
+
+    const size_t p = index % pairs;
+    const size_t head = (index / pairs) % (n_heads + n_kv_heads);
+    const size_t token = index / (pairs * (n_heads + n_kv_heads));
+
+    const bool is_q = head < n_heads;
+    const uint32_t h = is_q ? (uint32_t)head : (uint32_t)(head - n_heads);
+    const uint32_t heads = is_q ? n_heads : n_kv_heads;
+    const uint32_t position = token_positions[token];
+
+    const float angle = (float)position * inv_freq[p];
+    const float c = cosf(angle), s = sinf(angle);
+
+    float *tensor = is_q ? q : k;
+    const size_t base = ((size_t)token * heads + h) * head_dim;
+    const size_t a = base + p;
+    const size_t b = base + head_dim / 2 + p;
+    const float x = tensor[a], y = tensor[b];
+    tensor[a] = x * c - y * s;
+    tensor[b] = x * s + y * c;
+}
+
+/* Causal GQA attention over the logical view [ shared prefix | own suffix ].
+ * The two segments are walked in sequence, so the key indices covered are
+ * 0..prefix_len-1 followed by prefix_len..prefix_len+lp, i.e. exactly
+ * 0..position with no mask tensor and no materialised concatenation
+ * (M3 §12-§14). Branch isolation is the branch term in the suffix base
+ * address: no other branch's rows are reachable (§21). */
+__global__ static void attention_segmented_kernel(
+    const float *q, float *out, uint32_t tokens, uint32_t n_heads,
+    uint32_t n_kv_heads, uint32_t head_dim, float scale, const float *prefix_k,
+    const float *prefix_v, uint32_t prefix_len, uint32_t prefix_capacity,
+    const float *suffix_k, const float *suffix_v, uint32_t suffix_capacity,
+    uint32_t suffix_num_layers, uint32_t suffix_layer,
+    const uint32_t *token_branch, const uint32_t *token_local_pos) {
+    const uint32_t token = blockIdx.x;
+    const uint32_t head = blockIdx.y;
+    if (token >= tokens || head >= n_heads) return;
+
+    const uint32_t group = n_heads / n_kv_heads;
+    const uint32_t kv_head = head / group;
+    const uint32_t row = n_kv_heads * head_dim;
+
+    const float *q_row = q + ((size_t)token * n_heads + head) * head_dim;
+    const uint32_t lane = threadIdx.x;
+    const uint32_t dims_per_lane = head_dim / 32;
+
+    const uint32_t b = token_branch[token];
+    const uint32_t lp = token_local_pos[token];
+    const size_t branch_base =
+        ((size_t)b * suffix_num_layers + suffix_layer) * suffix_capacity * row;
+    /* The prefix slabs are [num_layers][prefix_capacity][kv_heads][head_dim]:
+     * the layer offset applies to both segments. */
+    const size_t prefix_layer_base =
+        (size_t)suffix_layer * prefix_capacity * row;
+    const float *pk =
+        prefix_k + prefix_layer_base + (size_t)kv_head * head_dim;
+    const float *pv =
+        prefix_v + prefix_layer_base + (size_t)kv_head * head_dim;
+    const float *sk = suffix_k + branch_base + (size_t)kv_head * head_dim;
+    const float *sv = suffix_v + branch_base + (size_t)kv_head * head_dim;
+
+    /* Pass 1: max score over the two visible segments. */
+    float max_score = -INFINITY;
+    for (uint32_t j = 0; j < prefix_len; j++) {
+        const float *k_row = pk + (size_t)j * row;
+        float dot = 0.0f;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            dot += q_row[d] * k_row[d];
+        }
+        for (unsigned offset = 16; offset; offset >>= 1)
+            dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        max_score = fmaxf(max_score, dot * scale);
+    }
+    for (uint32_t j = 0; j <= lp; j++) {
+        const float *k_row = sk + (size_t)j * row;
+        float dot = 0.0f;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            dot += q_row[d] * k_row[d];
+        }
+        for (unsigned offset = 16; offset; offset >>= 1)
+            dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        max_score = fmaxf(max_score, dot * scale);
+    }
+
+    /* Pass 2: softmax denominator + weighted sum of V. */
+    float den = 0.0f;
+    float acc[4];
+    for (uint32_t i = 0; i < dims_per_lane; i++) acc[i] = 0.0f;
+    for (uint32_t j = 0; j < prefix_len; j++) {
+        const float *k_row = pk + (size_t)j * row;
+        const float *v_row = pv + (size_t)j * row;
+        float dot = 0.0f;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            dot += q_row[d] * k_row[d];
+        }
+        for (unsigned offset = 16; offset; offset >>= 1)
+            dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        const float p = __expf(dot * scale - max_score);
+        den += p;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            acc[i] += p * v_row[d];
+        }
+    }
+    for (uint32_t j = 0; j <= lp; j++) {
+        const float *k_row = sk + (size_t)j * row;
+        const float *v_row = sv + (size_t)j * row;
+        float dot = 0.0f;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            dot += q_row[d] * k_row[d];
+        }
+        for (unsigned offset = 16; offset; offset >>= 1)
+            dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        const float p = __expf(dot * scale - max_score);
+        den += p;
+        for (uint32_t i = 0; i < dims_per_lane; i++) {
+            const uint32_t d = lane + i * 32;
+            acc[i] += p * v_row[d];
+        }
+    }
+
+    float *out_row = out + ((size_t)token * n_heads + head) * head_dim;
+    for (uint32_t i = 0; i < dims_per_lane; i++) {
+        const uint32_t d = lane + i * 32;
+        out_row[d] = acc[i] / den;
+    }
+}
+
+/* Scatter the packed batch's roped K/V rows into each token's private
+ * branch slab (M3 §22). One launch covers both K and V. */
+__global__ static void kv_scatter_kernel(float *suffix_k, float *suffix_v,
+                                         const float *k_src,
+                                         const float *v_src,
+                                         const uint32_t *token_branch,
+                                         const uint32_t *token_local_pos,
+                                         uint32_t tokens, uint32_t row,
+                                         uint32_t suffix_capacity,
+                                         uint32_t num_layers,
+                                         uint32_t layer) {
+    const size_t index = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t total = (size_t)tokens * row;
+    if (index >= total) return;
+    const uint32_t token = (uint32_t)(index / row);
+    const uint32_t e = (uint32_t)(index % row);
+    const uint32_t b = token_branch[token];
+    const uint32_t lp = token_local_pos[token];
+    const size_t dst =
+        ((size_t)b * num_layers + layer) * suffix_capacity * row +
+        (size_t)lp * row + e;
+    suffix_k[dst] = k_src[index];
+    suffix_v[dst] = v_src[index];
+}
+
+/* Gather each branch's last suffix row out of the final-norm buffer. */
+__global__ static void gather_last_rows_kernel(const float *src,
+                                               const uint32_t *branch_offsets,
+                                               uint32_t branch_count,
+                                               uint32_t hidden, float *out) {
+    const uint32_t b = blockIdx.x;
+    if (b >= branch_count) return;
+    const uint32_t last = branch_offsets[b + 1] - 1;
+    const float *row = src + (size_t)last * hidden;
+    float *dst = out + (size_t)b * hidden;
+    for (uint32_t i = threadIdx.x; i < hidden; i += blockDim.x)
+        dst[i] = row[i];
+}
+
+/* Batched selected-row LM head: one CTA per (branch, candidate). */
+__global__ static void candidate_logits_batched_kernel(
+    const float *hidden_per_branch, const void *weight, uint32_t qtype,
+    uint32_t hidden_size, const uint32_t *candidate_ids, uint32_t candidate_count,
+    float *logits) {
+    const uint32_t index = blockIdx.x;
+    const uint32_t b = index / candidate_count;
+    const uint32_t id = candidate_ids[index];
+    const float *hidden = hidden_per_branch + (size_t)b * hidden_size;
+    const uint32_t blocks_per_row = hidden_size / Q3_QUANT_QK_K;
+    const uint32_t lane = threadIdx.x;
+    float sum = 0.0f;
+    for (uint32_t block = 0; block < blocks_per_row; block++) {
+        const size_t block_index = (size_t)id * blocks_per_row + block;
+        for (uint32_t e = lane; e < Q3_QUANT_QK_K; e += blockDim.x) {
+            const uint32_t feature = block * Q3_QUANT_QK_K + e;
+            float w;
+            if (qtype == Q3_QUANT_Q4_K) {
+                w = q4_value_dev((const q3_q4_k_block *)weight + block_index, e);
+            } else {
+                w = q6_value_dev((const uint8_t *)weight +
+                                     block_index * Q3_QUANT_Q6_K_BLOCK_BYTES, e);
+            }
+            sum += w * hidden[feature];
+        }
+    }
+    for (unsigned offset = 16; offset; offset >>= 1)
+        sum += __shfl_down_sync(0xffffffffu, sum, offset);
+    if (lane == 0) logits[index] = sum;
+}
+
+/* =========================================================================
  * Host-side helpers
  * ========================================================================= */
 
@@ -395,6 +616,9 @@ struct q3_kv_cache {
     uint32_t length;
     float *k; /* [num_layers][capacity][num_kv_heads][head_dim] */
     float *v;
+    /* False for the aliasing header used by the M3 prefix prefill: the slabs
+     * belong to the prefix and must not be freed here (M3 §9). */
+    bool owns_storage;
 };
 
 /* =========================================================================
@@ -517,6 +741,61 @@ extern "C" bool q3_cuda_embedding(float *hidden, const uint32_t *token_ids,
     Q3_CUDA_CHECK("q3_cuda_embedding launch failed");
     return true;
 }
+
+/* --- M3 primitive surface ------------------------------------------ */
+
+extern "C" bool q3_cuda_rope_positions(float *q, float *k, uint32_t tokens,
+                                       uint32_t n_heads, uint32_t n_kv_heads,
+                                       uint32_t head_dim,
+                                       const uint32_t *token_positions,
+                                       const float *inv_freq, void *stream,
+                                       char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!q || !k || !inv_freq || !token_positions || tokens == 0 ||
+        head_dim == 0 || head_dim % 2 != 0) {
+        set_error(error, error_len, "q3_cuda_rope_positions: invalid argument");
+        return false;
+    }
+    const size_t total = (size_t)tokens * (n_heads + n_kv_heads) * (head_dim / 2);
+    const unsigned grid = (unsigned)((total + 255) / 256);
+    rope_kernel_positions<<<grid, 256, 0, (cudaStream_t)stream>>>(
+        q, k, tokens, n_heads, n_kv_heads, head_dim, token_positions, inv_freq);
+    Q3_CUDA_CHECK("q3_cuda_rope_positions launch failed");
+    return true;
+}
+
+extern "C" bool q3_cuda_attention_segmented(
+    const float *q, const float *prefix_k, const float *prefix_v,
+    uint32_t prefix_len, uint32_t prefix_capacity, const float *suffix_k,
+    const float *suffix_v, uint32_t suffix_capacity, uint32_t suffix_num_layers,
+    uint32_t suffix_layer, const uint32_t *token_branch,
+    const uint32_t *token_local_pos, uint32_t tokens, uint32_t n_heads,
+    uint32_t n_kv_heads, uint32_t head_dim, float scale, float *out,
+    void *stream, char *error, size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!q || !out || !prefix_k || !prefix_v || !suffix_k || !suffix_v ||
+        !token_branch || !token_local_pos || tokens == 0 || n_heads == 0 ||
+        n_kv_heads == 0 || head_dim == 0 || head_dim % 32 != 0 ||
+        prefix_len > prefix_capacity || suffix_num_layers == 0) {
+        set_error(error, error_len,
+                  "q3_cuda_attention_segmented: invalid argument");
+        return false;
+    }
+    dim3 grid(tokens, n_heads);
+    attention_segmented_kernel<<<grid, 32, 0, (cudaStream_t)stream>>>(
+        q, out, tokens, n_heads, n_kv_heads, head_dim, scale, prefix_k, prefix_v,
+        prefix_len, prefix_capacity, suffix_k, suffix_v, suffix_capacity,
+        suffix_num_layers, suffix_layer, token_branch, token_local_pos);
+    Q3_CUDA_CHECK("q3_cuda_attention_segmented launch failed");
+    return true;
+}
+
+extern "C" bool q3_candidate_logits_batched(
+    q3_forward_runtime *runtime, const float *device_hidden_per_branch,
+    uint32_t branch_count, const uint32_t *candidate_ids_host,
+    uint32_t candidate_count, float *device_logits, char *error,
+    size_t error_len);
+
 /* =========================================================================
  * KV cache API (M2 §17-§18). FP32, layout [layer][position][kv_head][head_dim].
  * ========================================================================= */
@@ -541,6 +820,7 @@ extern "C" q3_kv_cache *q3_kv_cache_init(uint32_t num_layers,
     kv->head_dim = head_dim;
     kv->capacity = capacity;
     kv->length = 0;
+    kv->owns_storage = true;
     const size_t per_layer = (size_t)capacity * num_kv_heads * head_dim;
     if (cudaMalloc(&kv->k, per_layer * num_layers * sizeof(float)) != cudaSuccess ||
         cudaMalloc(&kv->v, per_layer * num_layers * sizeof(float)) != cudaSuccess) {
@@ -592,9 +872,42 @@ extern "C" void q3_kv_cache_reset(q3_kv_cache *kv) {
 
 extern "C" void q3_kv_cache_destroy(q3_kv_cache *kv) {
     if (!kv) return;
-    if (kv->k) cudaFree(kv->k);
-    if (kv->v) cudaFree(kv->v);
+    if (kv->owns_storage) {
+        if (kv->k) cudaFree(kv->k);
+        if (kv->v) cudaFree(kv->v);
+    }
     free(kv);
+}
+
+/* Borrowing header: the M3 prefix prefill points the ordinary append path at
+ * the prefix slabs so roped K/V land there directly, with no temporary KV and
+ * no copy (M3 §9). */
+extern "C" q3_kv_cache *q3_kv_cache_alias(float *k, float *v,
+                                          uint32_t num_layers,
+                                          uint32_t num_kv_heads,
+                                          uint32_t head_dim, uint32_t capacity,
+                                          uint32_t length, char *error,
+                                          size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!k || !v || num_layers == 0 || num_kv_heads == 0 || head_dim == 0 ||
+        capacity == 0) {
+        set_error(error, error_len, "q3_kv_cache_alias: invalid argument");
+        return NULL;
+    }
+    q3_kv_cache *kv = (q3_kv_cache *)calloc(1, sizeof(q3_kv_cache));
+    if (!kv) {
+        set_error(error, error_len, "q3_kv_cache_alias: allocation failed");
+        return NULL;
+    }
+    kv->num_layers = num_layers;
+    kv->num_kv_heads = num_kv_heads;
+    kv->head_dim = head_dim;
+    kv->capacity = capacity;
+    kv->length = length;
+    kv->k = k;
+    kv->v = v;
+    kv->owns_storage = false;
+    return kv;
 }
 
 extern "C" uint32_t q3_kv_cache_length(const q3_kv_cache *kv) {
@@ -715,7 +1028,7 @@ extern "C" q3_forward_runtime *q3_forward_create(const q3_weights *weights,
         }
     }
     rt->mmq_arena_bytes = q3_cuda_q4k_linear_workspace_bytes();
-    rt->candidate_capacity = 64;
+    rt->candidate_capacity = Q3_CANDIDATE_CAPACITY;
 
     /* Workspace layout: compute the total size first, then slice. */
     const size_t align = 256;
@@ -731,9 +1044,9 @@ extern "C" q3_forward_runtime *q3_forward_create(const q3_weights *weights,
     total += align_up(T * inter * sizeof(float), align);       /* up       */
     total += align_up(T * hidden * sizeof(float), align);      /* down     */
     total += align_up(T * hidden * sizeof(float), align);      /* final    */
-    total += align_up(64 * sizeof(float), align);              /* logits   */
+    total += align_up(Q3_CANDIDATE_CAPACITY * sizeof(float), align);     /* logits   */
     total += align_up((D / 2) * sizeof(float), align);         /* inv_freq */
-    total += align_up(64 * sizeof(uint32_t), align);           /* cand ids */
+    total += align_up(Q3_CANDIDATE_CAPACITY * sizeof(uint32_t), align);  /* cand ids */
     total += align_up(rt->mmq_arena_bytes, align);             /* mmq arena */
 
     rt->workspace_bytes = total;
@@ -757,9 +1070,9 @@ extern "C" q3_forward_runtime *q3_forward_create(const q3_weights *weights,
         rt->up = (float *)p; p += align_up(T * inter * sizeof(float), align);
         rt->down = (float *)p; p += align_up(T * hidden * sizeof(float), align);
         rt->final = (float *)p; p += align_up(T * hidden * sizeof(float), align);
-        rt->logits = (float *)p; p += align_up(64 * sizeof(float), align);
+        rt->logits = (float *)p; p += align_up(Q3_CANDIDATE_CAPACITY * sizeof(float), align);
         rt->inv_freq = (float *)p; p += align_up((D / 2) * sizeof(float), align);
-        rt->candidate_ids_dev = (uint32_t *)p; p += align_up(64 * sizeof(uint32_t), align);
+        rt->candidate_ids_dev = (uint32_t *)p; p += align_up(Q3_CANDIDATE_CAPACITY * sizeof(uint32_t), align);
         rt->mmq_arena = (void *)p; p += align_up(rt->mmq_arena_bytes, align);
     }
 
@@ -1082,6 +1395,230 @@ extern "C" bool q3_forward_run_range(q3_forward_runtime *runtime,
     return true;
 }
 
+/* =========================================================================
+ * M3 packed forward (M3 §18-§22). One pass over the ragged suffix batch:
+ * every token attends to the shared prefix plus its own branch's suffix rows.
+ * Structurally the same layer body as run_layer, with three changes: RoPE
+ * takes per-token positions, attention is the two-segment branch-isolated
+ * kernel, and the KV append scatters into per-branch slabs.
+ * ========================================================================= */
+
+static bool run_layer_packed(q3_forward_runtime *rt, uint32_t layer,
+                             const q3_pack_view *view, uint32_t token_count,
+                             float *hidden_inout, char *error,
+                             size_t error_len) {
+    const q3_layer_weights *w = &rt->weights.layer[layer];
+    const q3_model_config *cfg = &rt->config;
+    const uint32_t H = cfg->num_attention_heads;
+    const uint32_t Hkv = cfg->num_kv_heads;
+    const uint32_t D = cfg->head_dim;
+    const uint32_t hidden = cfg->hidden_size;
+    const uint32_t inter = cfg->intermediate_size;
+    cudaStream_t stream = rt->stream;
+    const float eps = cfg->rms_norm_eps;
+    const float scale = 1.0f / sqrtf((float)D);
+
+    q3_q4_linear_geometry geo;
+    q3_q4_linear_stats lstats;
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_NORM], stream);
+    if (!q3_cuda_rms_norm(hidden_inout, (const float *)w->input_norm.device,
+                          token_count, hidden, eps, rt->normed, stream, error,
+                          error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_NORM], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->q_proj.qtype, w->q_proj.k, w->q_proj.n,
+                                    &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_Q], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->q_proj.device, rt->normed, token_count,
+                            rt->q, stream, &lstats, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_Q], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->k_proj.qtype, w->k_proj.k, w->k_proj.n,
+                                    &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_K], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->k_proj.device, rt->normed, token_count,
+                            rt->k, stream, &lstats, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_K], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->v_proj.qtype, w->v_proj.k, w->v_proj.n,
+                                    &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_V], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->v_proj.device, rt->normed, token_count,
+                            rt->v, stream, &lstats, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_V], stream);
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_QK_NORM], stream);
+    if (!q3_cuda_rms_norm(rt->q, (const float *)w->q_norm.device,
+                          token_count * H, D, eps, rt->q, stream, error, error_len))
+        return false;
+    if (!q3_cuda_rms_norm(rt->k, (const float *)w->k_norm.device,
+                          token_count * Hkv, D, eps, rt->k, stream, error,
+                          error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_QK_NORM], stream);
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_ROPE], stream);
+    if (!q3_cuda_rope_positions(rt->q, rt->k, token_count, H, Hkv, D,
+                                view->token_positions, rt->inv_freq, stream,
+                                error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_ROPE], stream);
+
+    /* Scatter this batch's K/V into each token's own branch slab. */
+    {
+        const uint32_t row = Hkv * D;
+        const size_t total = (size_t)token_count * row;
+        const unsigned grid = (unsigned)((total + 255) / 256);
+        kv_scatter_kernel<<<grid, 256, 0, stream>>>(
+            view->suffix_k, view->suffix_v, rt->k, rt->v, view->token_branch,
+            view->token_local_pos, token_count, row, view->suffix_capacity,
+            view->suffix_num_layers, layer);
+        Q3_CUDA_CHECK("kv_scatter_kernel launch failed");
+    }
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_ATTN], stream);
+    if (!q3_cuda_attention_segmented(
+            rt->q, view->prefix_k, view->prefix_v, view->prefix_len,
+            view->prefix_capacity, view->suffix_k, view->suffix_v,
+            view->suffix_capacity, view->suffix_num_layers, layer,
+            view->token_branch, view->token_local_pos, token_count, H, Hkv, D,
+            scale, rt->attn, stream, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_ATTN], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->o_proj.qtype, w->o_proj.k, w->o_proj.n,
+                                    &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_OPROJ], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->o_proj.device, rt->attn, token_count,
+                            rt->oproj, stream, &lstats, error, error_len))
+        return false;
+    if (!q3_cuda_residual_add(hidden_inout, rt->oproj,
+                              (size_t)token_count * hidden, stream, error,
+                              error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_OPROJ], stream);
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_MLP_NORM], stream);
+    if (!q3_cuda_rms_norm(hidden_inout, (const float *)w->post_attn_norm.device,
+                          token_count, hidden, eps, rt->normed, stream, error,
+                          error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_MLP_NORM], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->gate_proj.qtype, w->gate_proj.k,
+                                    w->gate_proj.n, &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_GATE], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->gate_proj.device, rt->normed, token_count,
+                            rt->gate, stream, &lstats, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_GATE], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->up_proj.qtype, w->up_proj.k, w->up_proj.n,
+                                    &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_UP], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->up_proj.device, rt->normed, token_count,
+                            rt->up, stream, &lstats, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_UP], stream);
+
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_ACT], stream);
+    if (!q3_cuda_silu_mul(rt->gate, rt->up, rt->gate,
+                          (size_t)token_count * inter, stream, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_ACT], stream);
+
+    if (!q3_q4_linear_bind_geometry(w->down_proj.qtype, w->down_proj.k,
+                                    w->down_proj.n, &geo, error, error_len))
+        return false;
+    cudaEventRecord(rt->phase_begin[Q3_FWD_PHASE_DOWN], stream);
+    if (!q3_cuda_q4k_linear(&geo, w->down_proj.device, rt->gate, token_count,
+                            rt->down, stream, &lstats, error, error_len))
+        return false;
+    if (!q3_cuda_residual_add(hidden_inout, rt->down,
+                              (size_t)token_count * hidden, stream, error,
+                              error_len))
+        return false;
+    cudaEventRecord(rt->phase_end[Q3_FWD_PHASE_DOWN], stream);
+
+    return true;
+}
+
+extern "C" bool q3_forward_run_packed(q3_forward_runtime *runtime,
+                                      const uint32_t *token_ids_host,
+                                      uint32_t token_count,
+                                      const q3_pack_view *view,
+                                      float *device_hidden_per_branch,
+                                      q3_forward_stats *stats, char *error,
+                                      size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!runtime || !token_ids_host || !view || !device_hidden_per_branch ||
+        token_count == 0 || token_count > runtime->max_tokens ||
+        view->branch_count == 0 || view->branch_count > Q3_PACK_MAX_BRANCHES ||
+        !view->token_positions || !view->token_branch ||
+        !view->token_local_pos || !view->branch_offsets || !view->prefix_k ||
+        !view->prefix_v || !view->suffix_k || !view->suffix_v) {
+        set_error(error, error_len, "q3_forward_run_packed: invalid argument");
+        return false;
+    }
+    if (stats) memset(stats, 0, sizeof(*stats));
+    runtime->last_stats = stats;
+    runtime->last_token_count = token_count;
+    runtime->last_first_layer = 0;
+    runtime->last_last_layer = runtime->config.num_layers;
+    runtime->last_ran = true;
+    runtime->last_embedding_ran = true;
+    runtime->last_final_norm_ran = false;
+    runtime->last_candidate_ran = false;
+
+    cudaStream_t stream = runtime->stream;
+
+    cudaEventRecord(runtime->phase_begin[Q3_FWD_PHASE_EMBED], stream);
+    if (!q3_cuda_embedding(runtime->hidden, token_ids_host, token_count,
+                           runtime->weights.embedding.device,
+                           runtime->weights.embedding.qtype,
+                           runtime->config.hidden_size,
+                           runtime->weights.embedding.n, stream, error, error_len))
+        return false;
+    cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_EMBED], stream);
+
+    for (uint32_t l = 0; l < runtime->config.num_layers; l++) {
+        if (!run_layer_packed(runtime, l, view, token_count, runtime->hidden,
+                              error, error_len))
+            return false;
+    }
+
+    cudaEventRecord(runtime->phase_begin[Q3_FWD_PHASE_FINAL_NORM], stream);
+    if (!q3_cuda_rms_norm(runtime->hidden,
+                          (const float *)runtime->weights.final_norm.device,
+                          token_count, runtime->config.hidden_size,
+                          runtime->config.rms_norm_eps, runtime->final, stream,
+                          error, error_len))
+        return false;
+    gather_last_rows_kernel<<<view->branch_count, 128, 0, stream>>>(
+        runtime->final, view->branch_offsets, view->branch_count,
+        runtime->config.hidden_size, device_hidden_per_branch);
+    Q3_CUDA_CHECK("gather_last_rows_kernel launch failed");
+    cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_FINAL_NORM], stream);
+    runtime->last_final_norm_ran = true;
+
+    if (stats) {
+        stats->token_count = token_count;
+        stats->layers_executed = runtime->config.num_layers;
+    }
+    return true;
+}
+
 extern "C" bool q3_forward_final_norm(q3_forward_runtime *runtime,
                                       uint32_t token_count,
                                       float *device_hidden_out,
@@ -1277,6 +1814,49 @@ extern "C" bool q3_candidate_logits(q3_forward_runtime *runtime,
         device_hidden_last, out->device, out->qtype, runtime->config.hidden_size,
         runtime->candidate_ids_dev, device_logits);
     Q3_CUDA_CHECK("q3_candidate_logits launch failed");
+    cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_CAND], stream);
+    runtime->last_candidate_ran = true;
+    return true;
+}
+
+extern "C" void q3_forward_geometry(const q3_forward_runtime *runtime,
+                                    uint32_t *num_layers, uint32_t *hidden_size,
+                                    uint32_t *num_heads, uint32_t *num_kv_heads,
+                                    uint32_t *head_dim, uint32_t *max_tokens) {
+    if (!runtime) return;
+    if (num_layers) *num_layers = runtime->config.num_layers;
+    if (hidden_size) *hidden_size = runtime->config.hidden_size;
+    if (num_heads) *num_heads = runtime->config.num_attention_heads;
+    if (num_kv_heads) *num_kv_heads = runtime->config.num_kv_heads;
+    if (head_dim) *head_dim = runtime->config.head_dim;
+    if (max_tokens) *max_tokens = runtime->max_tokens;
+}
+
+extern "C" bool q3_candidate_logits_batched(
+    q3_forward_runtime *runtime, const float *device_hidden_per_branch,
+    uint32_t branch_count, const uint32_t *candidate_ids_host,
+    uint32_t candidate_count, float *device_logits, char *error,
+    size_t error_len) {
+    if (error && error_len) error[0] = '\0';
+    if (!runtime || !device_hidden_per_branch || !candidate_ids_host ||
+        !device_logits || branch_count == 0 || candidate_count == 0 ||
+        branch_count * candidate_count > runtime->candidate_capacity) {
+        set_error(error, error_len,
+                  "q3_candidate_logits_batched: invalid argument");
+        return false;
+    }
+    cudaStream_t stream = runtime->stream;
+    cudaEventRecord(runtime->phase_begin[Q3_FWD_PHASE_CAND], stream);
+    cudaMemcpyAsync(runtime->candidate_ids_dev, candidate_ids_host,
+                    (size_t)branch_count * candidate_count * sizeof(uint32_t),
+                    cudaMemcpyHostToDevice, stream);
+    const q3_exec_tensor *out = &runtime->weights.output;
+    candidate_logits_batched_kernel<<<branch_count * candidate_count, 128, 0,
+                                      stream>>>(
+        device_hidden_per_branch, out->device, out->qtype,
+        runtime->config.hidden_size, runtime->candidate_ids_dev, candidate_count,
+        device_logits);
+    Q3_CUDA_CHECK("q3_candidate_logits_batched launch failed");
     cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_CAND], stream);
     runtime->last_candidate_ran = true;
     return true;

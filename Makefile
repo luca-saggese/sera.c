@@ -33,6 +33,7 @@ C_OBJS := \
 	src/q3_platform.o \
 	src/q3_residency.o \
 	src/q3_residency_plan.o \
+	src/q3_workload.o \
 	src/q3_main.o
 
 CUDA_OBJS := \
@@ -43,8 +44,10 @@ CUDA_OBJS := \
 	cuda/q3_mmq.o \
 	cuda/q3_q4_linear.o \
 	cuda/q3_forward.o \
+	cuda/q3_decide.o \
 	cuda/q3_forward_cli.o \
-	cuda/q3_bench_q4_linear.o
+	cuda/q3_bench_q4_linear.o \
+	cuda/q3_decide_cli.o
 
 # Native Q4_K MMQ/MMVQ compute closure (COPY -> RENAME -> EDIT from q38.c @ main).
 MMQ_OBJS := \
@@ -55,9 +58,9 @@ MMQ_OBJS := \
 OBJS := $(C_OBJS) $(CUDA_OBJS) $(MMQ_OBJS)
 
 TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear \
-	tests/test_q3_forward_primitives tests/test_q3_forward
+	tests/test_q3_forward_primitives tests/test_q3_forward tests/test_q3_decide
 
-.PHONY: all clean test test-gguf test-plan test-q4-linear test-forward-primitives test-forward
+.PHONY: all clean test test-gguf test-plan test-q4-linear test-forward-primitives test-forward test-decide
 
 all: $(BIN)
 
@@ -102,6 +105,9 @@ tests/test_q3_forward_primitives: tests/test_q3_forward_primitives.cu $(TEST_Q4_
 tests/test_q3_forward: tests/test_q3_forward.cu $(TEST_Q4_OBJS)
 	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
 
+tests/test_q3_decide: tests/test_q3_decide.cu $(TEST_Q4_OBJS)
+	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
+
 test-gguf: tests/test_q3_gguf
 	mkdir -p tests/fixtures
 	./tests/test_q3_gguf
@@ -118,7 +124,10 @@ test-forward-primitives: tests/test_q3_forward_primitives
 test-forward: tests/test_q3_forward
 	./tests/test_q3_forward
 
-test: test-gguf test-plan test-q4-linear test-forward-primitives test-forward
+test-decide: tests/test_q3_decide
+	./tests/test_q3_decide
+
+test: test-gguf test-plan test-q4-linear test-forward-primitives test-forward test-decide
 
 clean:
 	rm -f $(OBJS) $(BIN) $(TESTS)

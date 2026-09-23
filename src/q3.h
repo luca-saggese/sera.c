@@ -28,6 +28,7 @@ typedef enum {
     Q3_MODE_LOAD_ONLY,    /* --load-only model.gguf */
     Q3_MODE_BENCH_Q4_LINEAR, /* --bench-q4-linear model.gguf */
     Q3_MODE_FORWARD,      /* --forward model.gguf */
+    Q3_MODE_BENCH_DECISIONS, /* --bench-decisions model.gguf */
 } q3_mode;
 
 /* --- Narrowed engine options -------------------------------------- */
@@ -45,6 +46,7 @@ typedef struct {
     int batch_count;
     const char *tokens_path;   /* --tokens <file> (M2 forward) */
     const char *candidate_ids; /* --candidate-token-ids a,b,c (M2 forward) */
+    const char *workload_path; /* --workload <file> (M3 decisions) */
 } q3_options;
 
 /* --- Platform probe ----------------------------------------------- */

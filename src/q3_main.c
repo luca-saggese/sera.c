@@ -16,6 +16,7 @@
 #include "q3_model_loader_cuda.h"
 #include "q3_q4_linear.h"
 #include "q3_forward_cli.h"
+#include "q3_decide_cli.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -38,6 +39,8 @@ static void usage(FILE *fp) {
         "  --bench-q4-linear <model.gguf>\n"
         "                             Benchmark the resident Q4_K linear primitive\n"
         "  --forward <model.gguf>     One-pass forward over pre-tokenized IDs\n"
+        "  --bench-decisions <model.gguf>\n"
+        "                             M3 shared-prefix batched decision benchmark\n"
         "\n"
         "options:\n"
         "  --tensor <name>            Tensor to benchmark (default: largest Q4_K)\n"
@@ -45,6 +48,7 @@ static void usage(FILE *fp) {
         "  --tokens <file>            Token IDs (uint32 LE) for --forward\n"
         "  --candidate-token-ids <a,b,c>\n"
         "                             Candidate LM rows for --forward\n"
+        "  --workload <file>          Decision workload JSON for --bench-decisions\n"
         "  --json                     Machine-readable output\n"
         "  --verbose                  Extra diagnostics\n");
 }
@@ -575,6 +579,13 @@ int main(int argc, char **argv) {
             mode = Q3_MODE_FORWARD;
             if (i + 1 >= argc) { usage(stderr); return 2; }
             opt.model_path = argv[++i];
+        } else if (strcmp(a, "--bench-decisions") == 0) {
+            mode = Q3_MODE_BENCH_DECISIONS;
+            if (i + 1 >= argc) { usage(stderr); return 2; }
+            opt.model_path = argv[++i];
+        } else if (strcmp(a, "--workload") == 0) {
+            if (i + 1 >= argc) { usage(stderr); return 2; }
+            opt.workload_path = argv[++i];
         } else if (strcmp(a, "--tokens") == 0) {
             if (i + 1 >= argc) { usage(stderr); return 2; }
             opt.tokens_path = argv[++i];
@@ -627,6 +638,7 @@ int main(int argc, char **argv) {
     case Q3_MODE_LOAD_ONLY:    rc = cmd_load_only(&opt); break;
     case Q3_MODE_BENCH_Q4_LINEAR: rc = q3_cmd_bench_q4_linear(&opt); break;
     case Q3_MODE_FORWARD:       rc = q3_cmd_forward(&opt); break;
+    case Q3_MODE_BENCH_DECISIONS: rc = q3_cmd_bench_decisions(&opt); break;
     default:                   rc = 2; break;
     }
 
