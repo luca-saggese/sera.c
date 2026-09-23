@@ -63,6 +63,16 @@ int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32, float *out_f32,
                           int M, int N, int K, cudaStream_t stream,
                           q3_mmq_timings *timings);
 
+/* Dense Q6_K variants of the two entry points above. Identical memory
+ * contract; the only difference is the resident weight block layout.
+ * Needed for output.weight and the Q6_K attn_v / ffn_down layers. */
+int q3_mmq_q6_K_dense(const void *W, const float *X_f32, float *out_f32,
+                      int M, int N, int K, cudaStream_t stream,
+                      q3_mmq_timings *timings);
+int q3_mmq_q6_K_dense_vec(const void *W, const float *X_f32, float *out_f32,
+                          int M, int N, int K, cudaStream_t stream,
+                          q3_mmq_timings *timings);
+
 /* Bound of the MMVQ regime (donor MMVQ_MAX_BATCH_SIZE). */
 #define Q3_MMVQ_MAX_BATCH 8
 

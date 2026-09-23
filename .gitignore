@@ -18,3 +18,4 @@ tests/fixtures/*.bin
 
 # M1 test binaries
 tests/test_q3_q4_linear
+__pycache__/

@@ -28,6 +28,8 @@ BIN := q3
 C_OBJS := \
 	src/q3_gguf.o \
 	src/q3_memory.o \
+	src/q3_model.o \
+	src/q3_binder.o \
 	src/q3_platform.o \
 	src/q3_residency.o \
 	src/q3_residency_plan.o \
@@ -40,6 +42,8 @@ CUDA_OBJS := \
 	cuda/q3_cuda_primitives.o \
 	cuda/q3_mmq.o \
 	cuda/q3_q4_linear.o \
+	cuda/q3_forward.o \
+	cuda/q3_forward_cli.o \
 	cuda/q3_bench_q4_linear.o
 
 # Native Q4_K MMQ/MMVQ compute closure (COPY -> RENAME -> EDIT from q38.c @ main).

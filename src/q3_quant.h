@@ -18,10 +18,12 @@ extern "C" {
 
 enum {
     Q3_QUANT_Q4_K = 12,
+    Q3_QUANT_Q6_K = 14,
 };
 
 #define Q3_QUANT_QK_K 256
 #define Q3_QUANT_Q4_K_BLOCK_BYTES 144
+#define Q3_QUANT_Q6_K_BLOCK_BYTES 210
 
 typedef struct {
     uint16_t d;

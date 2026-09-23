@@ -28,6 +28,23 @@ typedef struct {
     uint64_t len;
 } q3_str;
 
+/* GGUF metadata value types (container format, not model-family). */
+enum {
+    Q3_GGUF_VALUE_UINT8   = 0,
+    Q3_GGUF_VALUE_INT8    = 1,
+    Q3_GGUF_VALUE_UINT16  = 2,
+    Q3_GGUF_VALUE_INT16   = 3,
+    Q3_GGUF_VALUE_UINT32  = 4,
+    Q3_GGUF_VALUE_INT32   = 5,
+    Q3_GGUF_VALUE_FLOAT32 = 6,
+    Q3_GGUF_VALUE_BOOL    = 7,
+    Q3_GGUF_VALUE_STRING  = 8,
+    Q3_GGUF_VALUE_ARRAY   = 9,
+    Q3_GGUF_VALUE_UINT64  = 10,
+    Q3_GGUF_VALUE_INT64   = 11,
+    Q3_GGUF_VALUE_FLOAT64 = 12,
+};
+
 /* One metadata key/value: key points into the mmap, value_pos is the offset
  * where the value begins (already decoded on demand). */
 typedef struct {
@@ -81,6 +98,17 @@ bool q3_gguf_get_string(const q3_gguf *m, const char *key, q3_str *out);
 bool q3_gguf_get_u32(const q3_gguf *m, const char *key, uint32_t *out);
 bool q3_gguf_get_u64(const q3_gguf *m, const char *key, uint64_t *out);
 bool q3_gguf_get_bool(const q3_gguf *m, const char *key, bool *out);
+
+/* Float accessor: accepts FLOAT32 and FLOAT64 GGUF values and yields float.
+ * Model configs store rope theta / rms eps as FLOAT32 in every GGUF seen so
+ * far, but the parser must not assume that. */
+bool q3_gguf_get_f32(const q3_gguf *m, const char *key, float *out);
+
+/* Raw metadata value access: exposes the mmap'd value bytes and the GGUF
+ * value type so model-family code (e.g. the config binder) can decode any
+ * scalar without the container growing family-specific accessors. */
+bool q3_gguf_get_value(const q3_gguf *m, const char *key, const void **ptr,
+                       uint64_t *size, uint32_t *type);
 
 /* Tensor-type helpers. */
 const char *q3_gguf_type_name(uint32_t type);

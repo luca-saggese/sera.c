@@ -489,3 +489,35 @@ bool q3_gguf_get_bool(const q3_gguf *m, const char *key, bool *out) {
     *out = v != 0;
     return true;
 }
+
+bool q3_gguf_get_f32(const q3_gguf *m, const char *key, float *out) {
+    q3_kv *kv = q3_gguf_find_kv(m, key);
+    if (!kv) return false;
+    q3_cursor c = cursor_at(m, kv->value_pos);
+    if (kv->type == GGUF_VALUE_FLOAT32) {
+        float v = 0.0f;
+        if (!cursor_read(&c, &v, sizeof(v))) return false;
+        *out = v;
+        return true;
+    }
+    if (kv->type == GGUF_VALUE_FLOAT64) {
+        double v = 0.0;
+        if (!cursor_read(&c, &v, sizeof(v))) return false;
+        *out = (float) v;
+        return true;
+    }
+    return false;
+}
+
+bool q3_gguf_get_value(const q3_gguf *m, const char *key, const void **ptr,
+                       uint64_t *size, uint32_t *type) {
+    q3_kv *kv = q3_gguf_find_kv(m, key);
+    if (!kv) return false;
+    q3_cursor c = cursor_at(m, kv->value_pos);
+    uint64_t n = scalar_value_size(kv->type);
+    if (n == 0 || !cursor_has(&c, n)) return false;
+    if (ptr) *ptr = m->map + kv->value_pos;
+    if (size) *size = n;
+    if (type) *type = kv->type;
+    return true;
+}

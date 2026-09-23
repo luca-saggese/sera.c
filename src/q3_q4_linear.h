@@ -50,6 +50,7 @@ typedef struct {
     int32_t M;
     int32_t N;
     int32_t K;
+    uint32_t qtype;   /* GGUF/GGML quant type of the weight */
     uint64_t weight_bytes;
 } q3_q4_linear_geometry;
 

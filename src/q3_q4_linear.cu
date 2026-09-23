@@ -53,9 +53,9 @@ extern "C" bool q3_q4_linear_bind_geometry(uint32_t qtype,
     if (!out) return false;
     memset(out, 0, sizeof(*out));
 
-    if (qtype != Q3_QUANT_Q4_K) {
+    if (qtype != Q3_QUANT_Q4_K && qtype != Q3_QUANT_Q6_K) {
         set_error(error, error_len,
-                  "q3_q4_linear: tensor is not Q4_K (M1 is Q4_K only)");
+                  "q3_q4_linear: tensor qtype is not Q4_K/Q6_K");
         return false;
     }
     /* GGUF dim[0] is the contiguous row length = K; dim[1] is the row count
@@ -82,8 +82,11 @@ extern "C" bool q3_q4_linear_bind_geometry(uint32_t qtype,
 
     out->K = (int32_t) K;
     out->N = (int32_t) N;
+    out->qtype = qtype;
     out->M = 0; /* resolved per call from the activation batch */
-    out->weight_bytes = N * (K / Q3_QUANT_QK_K) * Q3_QUANT_Q4_K_BLOCK_BYTES;
+    out->weight_bytes = N * (K / Q3_QUANT_QK_K) *
+                        (qtype == Q3_QUANT_Q6_K ? Q3_QUANT_Q6_K_BLOCK_BYTES
+                                                : Q3_QUANT_Q4_K_BLOCK_BYTES);
     return true;
 }
 
@@ -182,11 +185,20 @@ extern "C" bool q3_cuda_q4k_linear(const q3_q4_linear_geometry *geometry,
 
     cudaEventRecord(g_total_begin, cuda_stream);
 
-    const int rc = (tokens <= Q3_MMVQ_MAX_BATCH)
-        ? q3_mmq_q4_K_dense_vec(weight, device_input, device_output,
+    int rc;
+    if (tokens <= Q3_MMVQ_MAX_BATCH) {
+        rc = (geometry->qtype == Q3_QUANT_Q6_K)
+            ? q3_mmq_q6_K_dense_vec(weight, device_input, device_output,
+                                    features, tokens, K, cuda_stream, g_timings)
+            : q3_mmq_q4_K_dense_vec(weight, device_input, device_output,
+                                    features, tokens, K, cuda_stream, g_timings);
+    } else {
+        rc = (geometry->qtype == Q3_QUANT_Q6_K)
+            ? q3_mmq_q6_K_dense(weight, device_input, device_output,
                                 features, tokens, K, cuda_stream, g_timings)
-        : q3_mmq_q4_K_dense(weight, device_input, device_output,
-                            features, tokens, K, cuda_stream, g_timings);
+            : q3_mmq_q4_K_dense(weight, device_input, device_output,
+                                features, tokens, K, cuda_stream, g_timings);
+    }
 
     cudaEventRecord(g_total_end, cuda_stream);
 

@@ -893,8 +893,10 @@ void mul_mat_vec_q_switch_type(
         const int stride_channel_x, const int stride_channel_y, const int stride_channel_dst,
         const int nsamples_x, const int nsamples_dst, const int stride_sample_x, const int stride_sample_y, const int stride_sample_dst,
         const int ids_stride, cudaStream_t stream) {
-    /* q3: M1 supports Q4_K only. Any other type fails loudly rather than
-     * silently falling back to a slow or wrong path. */
+    /* q3: M2 supports the two K-quant weight types this model uses: Q4_K
+     * (most projections) and Q6_K (output.weight, attn_v / ffn_down on 32
+     * layers). Any other type fails loudly rather than silently falling back
+     * to a slow or wrong path. */
     switch (type_x) {
         case GGML_TYPE_Q4_K:
             mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q4_K>
@@ -902,8 +904,14 @@ void mul_mat_vec_q_switch_type(
                  nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
                  nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
             break;
+        case GGML_TYPE_Q6_K:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q6_K>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
         default:
-            GGML_ABORT("q3: mul_mat_vec_q_switch_type supports Q4_K only");
+            GGML_ABORT("q3: mul_mat_vec_q_switch_type supports Q4_K and Q6_K only");
             break;
     }
 }

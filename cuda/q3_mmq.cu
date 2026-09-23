@@ -28,9 +28,12 @@
 #include <cstdlib>
 
 /* mmq.cuh only declares the mul_mat_q_case<type> specializations; the donor
- * defines them one per type in ds4_mmq.cu. M1 instantiates Q4_K only, which
- * is exactly the "Q4_K only" trimming the spec asks for. */
+ * defines them one per type in ds4_mmq.cu. M2 instantiates Q4_K (embedding and
+ * most projections) and Q6_K (output.weight, and attn_v / ffn_down on 32 of
+ * the 64 layers). Nothing else is instantiated: no Q2_K/IQ2/Q8_0 paths. */
 template void mul_mat_q_case<GGML_TYPE_Q4_K>(
+    ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream);
+template void mul_mat_q_case<GGML_TYPE_Q6_K>(
     ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream);
 
 /* ------------------------------------------------------------------ *
@@ -91,7 +94,9 @@ size_t q3_mmq_tile_shared_bytes(int cc, int warp_size) {
     const int mmq_x = get_mmq_x_max_host(cc);
     const int mmq_y = get_mmq_y_host(cc);
     const int nwarps = mmq_get_nwarps_host(cc, warp_size);
-    return mmq_get_nbytes_shared<GGML_TYPE_Q4_K>(mmq_x, mmq_y, cc, warp_size, nwarps);
+    const size_t q4 = mmq_get_nbytes_shared<GGML_TYPE_Q4_K>(mmq_x, mmq_y, cc, warp_size, nwarps);
+    const size_t q6 = mmq_get_nbytes_shared<GGML_TYPE_Q6_K>(mmq_x, mmq_y, cc, warp_size, nwarps);
+    return q4 > q6 ? q4 : q6;
 }
 
 /* ------------------------------------------------------------------ *
@@ -226,8 +231,14 @@ extern "C" size_t q3_mmq_arena_bytes(void) {
 extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
                                  float *out_f32, int M, int N, int K,
                                  cudaStream_t stream,
-                                 q3_mmq_timings *timings) {
-    const char * tag = "q3_mmq_q4_K_dense";
+                                 q3_mmq_timings *timings);
+
+template <ggml_type type>
+static int q3_mmq_dense_impl(const void *W, const float *X_f32,
+                             float *out_f32, int M, int N, int K,
+                             cudaStream_t stream, q3_mmq_timings *timings) {
+    const char * tag = (type == GGML_TYPE_Q6_K) ? "q3_mmq_q6_K_dense"
+                                                 : "q3_mmq_q4_K_dense";
     if (!W || !X_f32 || !out_f32) {
         fprintf(stderr, "%s: null pointer\n", tag);
         return -1;
@@ -236,7 +247,7 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
         fprintf(stderr, "%s: bad shape M=%d N=%d K=%d\n", tag, M, N, K);
         return -1;
     }
-    /* K-quant super-block constraint. Fail loudly: M1 has no slow fallback. */
+    /* K-quant super-block constraint. Fail loudly: M2 has no slow fallback. */
     if (K % 256 != 0) {
         fprintf(stderr, "%s: K=%d must be a multiple of 256\n", tag, K);
         return -1;
@@ -268,6 +279,9 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
     /* Deterministic tail (donor S1.1a fix). */
     ybuf_memset(ybuf, nbytes_src1_q8_1, stream);
 
+    /* The activation is FP32 and is always quantized to Q8_1 through the
+     * Q4_K path: the donor keys this on the *destination* layout only, and
+     * both K-quants share ggml_blck_size == 256 and the same Q8_1 block. */
     quantize_mmq_q8_1_cuda(
         X_f32, /*ids=*/nullptr, ybuf,
         GGML_TYPE_Q4_K, /*ne00=*/K, /*s11=*/(int64_t) K,
@@ -283,8 +297,8 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
         return -2;
     }
 
-    const int64_t blck = ggml_blck_size(GGML_TYPE_Q4_K); /* 256 */
-    const int64_t s01  = (int64_t) K / blck;             /* weight blocks per row */
+    const int64_t blck = ggml_blck_size(type);       /* 256 for both K-quants */
+    const int64_t s01  = (int64_t) K / blck;         /* weight blocks per row */
     const int64_t s1   = (int64_t) M;
     const int64_t s12  = (int64_t) N * ne10_padded * sizeof(block_q8_1_mmq) /
                          (4 * QK8_1 * sizeof(int));
@@ -299,7 +313,7 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
 
     mmq_args args;
     args.x = (const char *) W;
-    args.type_x = GGML_TYPE_Q4_K;
+    args.type_x = type;
     args.y = (const int *) ybuf;
     args.ids_dst = nullptr;
     args.expert_bounds = nullptr;
@@ -326,7 +340,7 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
     /* mul_mat_q_case slices its stream-K fixup scratch out of the same
      * arena through the pool returned by ctx.pool(). */
     if (timings) cudaEventRecord(timings->kernel_begin, stream);
-    mul_mat_q_case<GGML_TYPE_Q4_K>(*ctx, args, stream);
+    mul_mat_q_case<type>(*ctx, args, stream);
     if (timings) cudaEventRecord(timings->kernel_end, stream);
 
     err = cudaGetLastError();
@@ -336,6 +350,20 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
         return -3;
     }
     return 0;
+}
+
+extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
+                                 float *out_f32, int M, int N, int K,
+                                 cudaStream_t stream,
+                                 q3_mmq_timings *timings) {
+    return q3_mmq_dense_impl<GGML_TYPE_Q4_K>(W, X_f32, out_f32, M, N, K, stream, timings);
+}
+
+extern "C" int q3_mmq_q6_K_dense(const void *W, const float *X_f32,
+                                 float *out_f32, int M, int N, int K,
+                                 cudaStream_t stream,
+                                 q3_mmq_timings *timings) {
+    return q3_mmq_dense_impl<GGML_TYPE_Q6_K>(W, X_f32, out_f32, M, N, K, stream, timings);
 }
 
 /* ------------------------------------------------------------------ *
@@ -348,8 +376,14 @@ extern "C" int q3_mmq_q4_K_dense(const void *W, const float *X_f32,
 extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
                                      float *out_f32, int M, int N, int K,
                                      cudaStream_t stream,
-                                     q3_mmq_timings *timings) {
-    const char * tag = "q3_mmq_q4_K_dense_vec";
+                                     q3_mmq_timings *timings);
+
+template <ggml_type type>
+static int q3_mmq_dense_vec_impl(const void *W, const float *X_f32,
+                                 float *out_f32, int M, int N, int K,
+                                 cudaStream_t stream, q3_mmq_timings *timings) {
+    const char * tag = (type == GGML_TYPE_Q6_K) ? "q3_mmq_q6_K_dense_vec"
+                                                 : "q3_mmq_q4_K_dense_vec";
     if (!W || !X_f32 || !out_f32) {
         fprintf(stderr, "%s: null pointer\n", tag);
         return -1;
@@ -392,6 +426,7 @@ extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
 
     if (timings) cudaEventRecord(timings->quant_begin, stream);
 
+    /* Activation quantization is always Q4_K-keyed (layout only). */
     quantize_row_q8_1_cuda(
         X_f32, /*ids=*/nullptr, ybuf,
         GGML_TYPE_Q4_K, /*ne00=*/K,
@@ -408,7 +443,7 @@ extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
         return -2;
     }
 
-    const int64_t blck    = ggml_blck_size(GGML_TYPE_Q4_K);
+    const int64_t blck    = ggml_blck_size(type);
     const int64_t s01_row = (int64_t) K / blck;
     const int64_t s11_y   = ne10_padded / QK8_1;
     const int64_t s12_y   = (int64_t) N * s11_y;
@@ -420,7 +455,7 @@ extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
 
     if (timings) cudaEventRecord(timings->kernel_begin, stream);
     mul_mat_vec_q_switch_type(
-        /*vx=*/W, /*type_x=*/GGML_TYPE_Q4_K,
+        /*vx=*/W, /*type_x=*/type,
         /*vy=*/ybuf,
         /*ids=*/nullptr, fusion,
         /*dst=*/out_f32,
@@ -442,4 +477,18 @@ extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
         return -3;
     }
     return 0;
+}
+
+extern "C" int q3_mmq_q4_K_dense_vec(const void *W, const float *X_f32,
+                                     float *out_f32, int M, int N, int K,
+                                     cudaStream_t stream,
+                                     q3_mmq_timings *timings) {
+    return q3_mmq_dense_vec_impl<GGML_TYPE_Q4_K>(W, X_f32, out_f32, M, N, K, stream, timings);
+}
+
+extern "C" int q3_mmq_q6_K_dense_vec(const void *W, const float *X_f32,
+                                     float *out_f32, int M, int N, int K,
+                                     cudaStream_t stream,
+                                     q3_mmq_timings *timings) {
+    return q3_mmq_dense_vec_impl<GGML_TYPE_Q6_K>(W, X_f32, out_f32, M, N, K, stream, timings);
 }

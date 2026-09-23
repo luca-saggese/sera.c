@@ -75,6 +75,33 @@ static void dequant_q4(const q3_q4_k_block *block, float *out) {
     }
 }
 
+static void dequant_q6(const uint8_t *block_bytes, float *out) {
+    /* block_q6_K: ql[128] low nibbles, qh[64] high 2 bits, scales[16] int8, d half.
+     * Layout matches ggml dequantize_row_q6_K. */
+    const uint8_t *ql = block_bytes;
+    const uint8_t *qh = block_bytes + 128;
+    const int8_t  *sc = (const int8_t *)(block_bytes + 128 + 64);
+    uint16_t d_bits;
+    memcpy(&d_bits, block_bytes + 128 + 64 + 16, sizeof(d_bits));
+    const float d = q3_half_to_float(d_bits);
+    const uint8_t *ql0 = ql, *qh0 = qh;
+    const int8_t *sc0 = sc;
+    for (unsigned j = 0; j < Q3_QUANT_QK_K; j += 128) {
+        for (unsigned l = 0; l < 32; ++l) {
+            const unsigned is = l / 16;
+            const int q1 = (int)((ql0[l] & 0xfu) | (((qh0[l] >> 0) & 3u) << 4)) - 32;
+            const int q2 = (int)((ql0[l + 32] & 0xfu) | (((qh0[l] >> 2) & 3u) << 4)) - 32;
+            const int q3 = (int)((ql0[l] >> 4) | (((qh0[l] >> 4) & 3u) << 4)) - 32;
+            const int q4 = (int)((ql0[l + 32] >> 4) | (((qh0[l] >> 6) & 3u) << 4)) - 32;
+            out[l + 0]  = d * (float)sc0[is + 0] * (float)q1;
+            out[l + 32] = d * (float)sc0[is + 2] * (float)q2;
+            out[l + 64] = d * (float)sc0[is + 4] * (float)q3;
+            out[l + 96] = d * (float)sc0[is + 6] * (float)q4;
+        }
+        out += 128; ql0 += 64; qh0 += 32; sc0 += 8;
+    }
+}
+
 bool q3_quant_dequantize_row(uint32_t type, const void *blocks,
                              size_t block_count, float *out,
                              size_t out_elements, char *error,
@@ -89,6 +116,12 @@ bool q3_quant_dequantize_row(uint32_t type, const void *blocks,
     if (type == Q3_QUANT_Q4_K) {
         const q3_q4_k_block *q = (const q3_q4_k_block *)blocks;
         for (size_t i = 0; i < block_count; i++) dequant_q4(&q[i], out + i * Q3_QUANT_QK_K);
+        return true;
+    }
+    if (type == Q3_QUANT_Q6_K) {
+        const uint8_t *q = (const uint8_t *)blocks;
+        for (size_t i = 0; i < block_count; i++)
+            dequant_q6(q + i * Q3_QUANT_Q6_K_BLOCK_BYTES, out + i * Q3_QUANT_QK_K);
         return true;
     }
     set_error(error, error_len, "unsupported scalar quantization type");
