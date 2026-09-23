@@ -85,21 +85,6 @@ extern "C" void q3_mmq_read_timings(q3_mmq_timings *t,
 namespace {
 
 /* ------------------------------------------------------------------ *
- * Peak shared memory the mul_mat_q tile kernel will request on this
- * device for the donor's own mmq_x / nwarps selection. Needed so the
- * caller can raise our private pool high-water mark above it and keep
- * the hot path allocation-free.
- * ------------------------------------------------------------------ */
-size_t q3_mmq_tile_shared_bytes(int cc, int warp_size) {
-    const int mmq_x = get_mmq_x_max_host(cc);
-    const int mmq_y = get_mmq_y_host(cc);
-    const int nwarps = mmq_get_nwarps_host(cc, warp_size);
-    const size_t q4 = mmq_get_nbytes_shared<GGML_TYPE_Q4_K>(mmq_x, mmq_y, cc, warp_size, nwarps);
-    const size_t q6 = mmq_get_nbytes_shared<GGML_TYPE_Q6_K>(mmq_x, mmq_y, cc, warp_size, nwarps);
-    return q4 > q6 ? q4 : q6;
-}
-
-/* ------------------------------------------------------------------ *
  * Persistent scratch arena, owned by the caller (the q3 runtime).
  *
  * Everything transient that the Q4_K dense path needs - the Q8_1 activation
@@ -205,19 +190,55 @@ extern "C" int q3_mmq_set_arena(void *ptr, size_t bytes) {
 }
 
 /* Caller-side helper: report the arena size the dense path needs so the
- * runtime can reserve it together with the activation workspace. */
-extern "C" size_t q3_mmq_arena_bytes(void) {
+ * runtime can reserve it together with the activation workspace.
+ *
+ * The arena holds two transient buffers, both sliced out of it per call:
+ *
+ *  1. the Q8_1 activation stage. Its size is driven by the *token batch*
+ *     and the padded contraction length, not by the output-feature count:
+ *     the MMQ interleaved layout stages `tokens * pad(K, 512)` values as
+ *     block_q8_1_mmq (144 bytes / 128 values), plus one tile of slack.
+ *     The MMVQ path (batch <= Q3_MMVQ_MAX_BATCH) is smaller and covered.
+ *     This term is what the old hardcoded 2 MiB constant got wrong: any
+ *     prompt longer than ~72 tokens at K=25600 overflowed.
+ *
+ *  2. the stream-K fixup scratch: nsm * mmq_x * mmq_y floats. The fixup
+ *     size does not depend on the geometry at all (ntiles_dst % block_nums
+ *     is either 0, i.e. no fixup, or block_nums == nsm).
+ *
+ * The mul_mat_q tile kernel's shared memory is *dynamic* shared memory
+ * (raised via CUDA_SET_SHARED_MEMORY_LIMIT at launch), so
+ * q3_mmq_tile_shared_bytes() must NOT be added here - doing so only wasted
+ * ~200 KB of device memory. */
+extern "C" size_t q3_mmq_arena_bytes(size_t max_tokens, int64_t max_features,
+                                     int64_t max_k) {
     const int dev = ggml_cuda_get_device();
     const int cc  = ggml_cuda_info().devices[dev].cc;
-    size_t bytes = q3_mmq_tile_shared_bytes(cc,
-        ggml_cuda_info().devices[dev].warp_size);
-    /* stream-K fixup scratch: at most nsm waves of mmq_x*mmq_y floats. */
+
+    size_t bytes = 0;
+
+    /* stream-K fixup scratch. */
     const size_t nsm   = (size_t) ggml_cuda_info().devices[dev].nsm;
     const size_t mmq_x = (size_t) get_mmq_x_max_host(cc);
     const size_t mmq_y = (size_t) get_mmq_y_host(cc);
-    bytes += (nsm + 4) * mmq_x * mmq_y * sizeof(float);
-    /* Q8_1 activation stage, worst case (MMQ interleaved layout, K padded). */
-    bytes += (size_t) 1 << 21;
+    bytes += nsm * mmq_x * mmq_y * sizeof(float);
+
+    /* Q8_1 activation stage, worst case: the MMQ interleaved layout.
+     * The feature count does not enter the stage size (the Q8_1 buffer is
+     * sized by tokens * padded_K); it is accepted only so the call site can
+     * pass the real geometry through unchanged. */
+    if (max_tokens > 0 && max_k > 0) {
+        const size_t staged = q3_mmq_q8_1_workspace_bytes(
+            (int) max_features, (int) max_tokens, (int) max_k, /*mmq_path=*/1);
+        const size_t vec = q3_mmq_q8_1_workspace_bytes(
+            (int) max_features, (int) max_tokens, (int) max_k, /*mmq_path=*/0);
+        bytes += staged > vec ? staged : vec;
+    } else {
+        /* Unspecified geometry (bench / primitive harness): keep the
+         * donor's old floor so those callers still work. */
+        bytes += (size_t) 1 << 21;
+    }
+
     return bytes + 8192;
 }
 

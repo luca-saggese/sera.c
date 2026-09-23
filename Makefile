@@ -54,9 +54,10 @@ MMQ_OBJS := \
 
 OBJS := $(C_OBJS) $(CUDA_OBJS) $(MMQ_OBJS)
 
-TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear
+TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear \
+	tests/test_q3_forward_primitives tests/test_q3_forward
 
-.PHONY: all clean test test-gguf test-plan test-q4-linear
+.PHONY: all clean test test-gguf test-plan test-q4-linear test-forward-primitives test-forward
 
 all: $(BIN)
 
@@ -95,6 +96,12 @@ TEST_Q4_OBJS := $(filter-out src/q3_main.o,$(OBJS))
 tests/test_q3_q4_linear: tests/test_q3_q4_linear.cu $(TEST_Q4_OBJS)
 	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
 
+tests/test_q3_forward_primitives: tests/test_q3_forward_primitives.cu $(TEST_Q4_OBJS)
+	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
+
+tests/test_q3_forward: tests/test_q3_forward.cu $(TEST_Q4_OBJS)
+	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -o $@ $< $(TEST_Q4_OBJS) $(CUDA_LDLIBS)
+
 test-gguf: tests/test_q3_gguf
 	mkdir -p tests/fixtures
 	./tests/test_q3_gguf
@@ -105,7 +112,13 @@ test-plan: tests/test_q3_residency_plan
 test-q4-linear: tests/test_q3_q4_linear
 	./tests/test_q3_q4_linear
 
-test: test-gguf test-plan test-q4-linear
+test-forward-primitives: tests/test_q3_forward_primitives
+	./tests/test_q3_forward_primitives
+
+test-forward: tests/test_q3_forward
+	./tests/test_q3_forward
+
+test: test-gguf test-plan test-q4-linear test-forward-primitives test-forward
 
 clean:
 	rm -f $(OBJS) $(BIN) $(TESTS)

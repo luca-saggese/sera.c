@@ -104,7 +104,23 @@ extern "C" int q3_cmd_bench_q4_linear(const q3_options *opt) {
         return 1;
     }
 
-    if (!q3_cuda_q4k_linear_init(0, err, sizeof(err))) {
+    /* Batches, default 1,4,16,32. */
+    int batches[16];
+    int batch_count = 0;
+    if (opt->batch_count > 0) {
+        for (int i = 0; i < opt->batch_count && i < 16; i++)
+            batches[batch_count++] = opt->batches[i];
+    } else {
+        const int defaults[] = { 1, 4, 16, 32 };
+        for (int i = 0; i < 4; i++) batches[batch_count++] = defaults[i];
+    }
+
+    int max_m = 0;
+    for (int i = 0; i < batch_count; i++)
+        if (batches[i] > max_m) max_m = batches[i];
+
+    if (!q3_cuda_q4k_linear_init(0, (size_t) max_m, geo.N, geo.K,
+                                 err, sizeof(err))) {
         fprintf(stderr, "q3: %s\n", err);
         q3_loader_context_destroy(ctx);
         q3_gguf_close(m);
@@ -128,21 +144,6 @@ extern "C" int q3_cmd_bench_q4_linear(const q3_options *opt) {
         q3_gguf_close(m);
         return 1;
     }
-
-    /* Batches, default 1,4,16,32. */
-    int batches[16];
-    int batch_count = 0;
-    if (opt->batch_count > 0) {
-        for (int i = 0; i < opt->batch_count && i < 16; i++)
-            batches[batch_count++] = opt->batches[i];
-    } else {
-        const int defaults[] = { 1, 4, 16, 32 };
-        for (int i = 0; i < 4; i++) batches[batch_count++] = defaults[i];
-    }
-
-    int max_m = 0;
-    for (int i = 0; i < batch_count; i++)
-        if (batches[i] > max_m) max_m = batches[i];
 
     cudaStream_t stream = nullptr;
     cudaStreamCreate(&stream);

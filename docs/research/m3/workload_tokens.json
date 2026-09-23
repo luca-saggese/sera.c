@@ -1,0 +1,910 @@
+{
+ "state_prompt": "The machine is ALPHA. The cat is gray. The horse is black. The car is red. The robot is a machine. The machine BETA is a machine. The cat is grey because the light is dim, but the cat is gray. The code is ALPHA. The robot is the machine. The machine is the robot. Yesterday the code was BETA; today the code is ALPHA. The policy covers repairs of red cars. The policy does not cover machines. The policy covers the cat if it is a pet. Alice is the owner. Alice owns the cat. The owner will be paid. The mark is XQZ.",
+ "state_tokens": [
+  785,
+  5662,
+  374,
+  82797,
+  13,
+  576,
+  8251,
+  374,
+  17545,
+  13,
+  576,
+  15223,
+  374,
+  3691,
+  13,
+  576,
+  1803,
+  374,
+  2518,
+  13,
+  576,
+  12305,
+  374,
+  264,
+  5662,
+  13,
+  576,
+  5662,
+  425,
+  20695,
+  374,
+  264,
+  5662,
+  13,
+  576,
+  8251,
+  374,
+  19780,
+  1576,
+  279,
+  3100,
+  374,
+  5103,
+  11,
+  714,
+  279,
+  8251,
+  374,
+  17545,
+  13,
+  576,
+  2038,
+  374,
+  82797,
+  13,
+  576,
+  12305,
+  374,
+  279,
+  5662,
+  13,
+  576,
+  5662,
+  374,
+  279,
+  12305,
+  13,
+  60033,
+  279,
+  2038,
+  572,
+  425,
+  20695,
+  26,
+  3351,
+  279,
+  2038,
+  374,
+  82797,
+  13,
+  576,
+  4842,
+  14521,
+  30186,
+  315,
+  2518,
+  9331,
+  13,
+  576,
+  4842,
+  1558,
+  537,
+  3421,
+  12645,
+  13,
+  576,
+  4842,
+  14521,
+  279,
+  8251,
+  421,
+  432,
+  374,
+  264,
+  6753,
+  13,
+  29405,
+  374,
+  279,
+  6372,
+  13,
+  29405,
+  24256,
+  279,
+  8251,
+  13,
+  576,
+  6372,
+  686,
+  387,
+  7171,
+  13,
+  576,
+  1868,
+  374,
+  1599,
+  48,
+  57,
+  13
+ ],
+ "questions": [
+  {
+   "id": "q01",
+   "category": "entity_binding",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    1894,
+    315,
+    279,
+    8251,
+    30
+   ],
+   "candidate_token_ids": [
+    11650,
+    11453,
+    1151
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q02",
+   "category": "composition",
+   "suffix_tokens": [
+    785,
+    12305,
+    374,
+    264,
+    5662,
+    11,
+    323,
+    279,
+    5662,
+    374,
+    82797,
+    13,
+    3555,
+    374,
+    279,
+    12305,
+    30
+   ],
+   "candidate_token_ids": [
+    969,
+    33,
+    11650
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q03",
+   "category": "negation",
+   "suffix_tokens": [
+    785,
+    1803,
+    374,
+    537,
+    17545,
+    13,
+    3555,
+    374,
+    279,
+    1803,
+    30
+   ],
+   "candidate_token_ids": [
+    11650,
+    1151,
+    11453
+   ],
+   "expected_index": 1
+  },
+  {
+   "id": "q04",
+   "category": "transitivity",
+   "suffix_tokens": [
+    785,
+    12305,
+    374,
+    264,
+    5662,
+    11,
+    323,
+    279,
+    5662,
+    374,
+    82797,
+    13,
+    3555,
+    374,
+    279,
+    12305,
+    30
+   ],
+   "candidate_token_ids": [
+    969,
+    16088,
+    33
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q05",
+   "category": "entity_binding",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    1894,
+    315,
+    279,
+    15223,
+    30
+   ],
+   "candidate_token_ids": [
+    11453,
+    11650,
+    1151
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q06",
+   "category": "transitivity",
+   "suffix_tokens": [
+    61686,
+    24256,
+    279,
+    8251,
+    13,
+    576,
+    8251,
+    374,
+    17545,
+    13,
+    3555,
+    1558,
+    29405,
+    1828,
+    30
+   ],
+   "candidate_token_ids": [
+    64,
+    64,
+    64
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q07",
+   "category": "temporal",
+   "suffix_tokens": [
+    15364,
+    279,
+    2038,
+    374,
+    82797,
+    13,
+    3555,
+    572,
+    279,
+    2038,
+    13671,
+    30
+   ],
+   "candidate_token_ids": [
+    969,
+    33,
+    1151
+   ],
+   "expected_index": 1
+  },
+  {
+   "id": "q08",
+   "category": "multi_hop",
+   "suffix_tokens": [
+    61686,
+    24256,
+    279,
+    8251,
+    13,
+    576,
+    8251,
+    374,
+    17545,
+    13,
+    3555,
+    1894,
+    374,
+    29405,
+    594,
+    6753,
+    30
+   ],
+   "candidate_token_ids": [
+    11650,
+    11453,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q09",
+   "category": "entity_binding",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    1894,
+    315,
+    279,
+    1803,
+    30
+   ],
+   "candidate_token_ids": [
+    1151,
+    11650,
+    11453
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q10",
+   "category": "exception",
+   "suffix_tokens": [
+    785,
+    4842,
+    1558,
+    537,
+    3421,
+    12645,
+    13,
+    576,
+    8251,
+    374,
+    537,
+    264,
+    5662,
+    13,
+    2160,
+    279,
+    8251,
+    9761,
+    30
+   ],
+   "candidate_token_ids": [
+    9693,
+    2152,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q11",
+   "category": "multi_hop",
+   "suffix_tokens": [
+    785,
+    6372,
+    686,
+    387,
+    7171,
+    13,
+    10479,
+    374,
+    279,
+    6372,
+    30
+   ],
+   "candidate_token_ids": [
+    61686,
+    1782,
+    1782
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q12",
+   "category": "temporal",
+   "suffix_tokens": [
+    785,
+    5662,
+    374,
+    82797,
+    13,
+    2160,
+    279,
+    5662,
+    425,
+    20695,
+    30
+   ],
+   "candidate_token_ids": [
+    2152,
+    9693,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q13",
+   "category": "temporal",
+   "suffix_tokens": [
+    641,
+    1584,
+    82797,
+    11,
+    374,
+    279,
+    1803,
+    2518,
+    30
+   ],
+   "candidate_token_ids": [
+    9693,
+    2152,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q14",
+   "category": "negation",
+   "suffix_tokens": [
+    785,
+    15223,
+    374,
+    537,
+    17545,
+    13,
+    3555,
+    374,
+    279,
+    15223,
+    30
+   ],
+   "candidate_token_ids": [
+    11453,
+    11650,
+    1151
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q15",
+   "category": "insurance_coverage",
+   "suffix_tokens": [
+    785,
+    4842,
+    14521,
+    30186,
+    315,
+    2518,
+    9331,
+    13,
+    2160,
+    264,
+    2518,
+    1803,
+    12733,
+    9761,
+    30
+   ],
+   "candidate_token_ids": [
+    9693,
+    2152,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q16",
+   "category": "italian",
+   "suffix_tokens": [
+    21685,
+    3016,
+    78787,
+    11422,
+    3815,
+    342,
+    16755,
+    30
+   ],
+   "candidate_token_ids": [
+    901,
+    68952,
+    32212
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q17",
+   "category": "composition",
+   "suffix_tokens": [
+    785,
+    5662,
+    374,
+    82797,
+    13,
+    576,
+    2038,
+    374,
+    82797,
+    13,
+    3555,
+    374,
+    6094,
+    553,
+    5662,
+    323,
+    2038,
+    30
+   ],
+   "candidate_token_ids": [
+    969,
+    33,
+    11650
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q18",
+   "category": "insurance_coverage",
+   "suffix_tokens": [
+    785,
+    4842,
+    1558,
+    537,
+    3421,
+    12645,
+    13,
+    2160,
+    264,
+    5662,
+    9761,
+    30
+   ],
+   "candidate_token_ids": [
+    2152,
+    9693,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q19",
+   "category": "insurance_routing",
+   "suffix_tokens": [
+    32,
+    2518,
+    1803,
+    3880,
+    12733,
+    13,
+    2585,
+    374,
+    279,
+    3717,
+    17608,
+    30
+   ],
+   "candidate_token_ids": [
+    20804,
+    1921,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q20",
+   "category": "insurance_routing",
+   "suffix_tokens": [
+    32,
+    5662,
+    3880,
+    12733,
+    13,
+    2585,
+    374,
+    279,
+    3717,
+    17608,
+    30
+   ],
+   "candidate_token_ids": [
+    1921,
+    20804,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q21",
+   "category": "unknown_entity",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    1894,
+    315,
+    279,
+    1147,
+    50213,
+    30
+   ],
+   "candidate_token_ids": [
+    16088,
+    11650,
+    11453
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q22",
+   "category": "unknown_entity",
+   "suffix_tokens": [
+    3838,
+    374,
+    1599,
+    48,
+    57,
+    30
+   ],
+   "candidate_token_ids": [
+    16088,
+    11650,
+    969
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q23",
+   "category": "unknown_entity",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    1894,
+    315,
+    279,
+    45740,
+    30
+   ],
+   "candidate_token_ids": [
+    16088,
+    1151,
+    11453
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q24",
+   "category": "unknown_attribute",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    4680,
+    315,
+    279,
+    8251,
+    30
+   ],
+   "candidate_token_ids": [
+    16088,
+    11650,
+    4145
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q25",
+   "category": "unknown_attribute",
+   "suffix_tokens": [
+    3838,
+    374,
+    279,
+    2608,
+    315,
+    279,
+    15223,
+    30
+   ],
+   "candidate_token_ids": [
+    16088,
+    11453,
+    83
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q26",
+   "category": "italian",
+   "suffix_tokens": [
+    21685,
+    3016,
+    78787,
+    11422,
+    3815,
+    59290,
+    385,
+    30
+   ],
+   "candidate_token_ids": [
+    68952,
+    901,
+    32212
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q27",
+   "category": "transitivity",
+   "suffix_tokens": [
+    785,
+    12305,
+    374,
+    279,
+    5662,
+    11,
+    323,
+    279,
+    5662,
+    374,
+    279,
+    12305,
+    13,
+    2160,
+    279,
+    12305,
+    279,
+    5662,
+    30
+   ],
+   "candidate_token_ids": [
+    9693,
+    2152,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q28",
+   "category": "negation",
+   "suffix_tokens": [
+    785,
+    8251,
+    374,
+    537,
+    3691,
+    13,
+    3555,
+    374,
+    279,
+    8251,
+    30
+   ],
+   "candidate_token_ids": [
+    11650,
+    11453,
+    1151
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q29",
+   "category": "insurance_routing",
+   "suffix_tokens": [
+    785,
+    8251,
+    374,
+    264,
+    6753,
+    13,
+    2585,
+    374,
+    279,
+    8251,
+    11660,
+    30
+   ],
+   "candidate_token_ids": [
+    20804,
+    1921,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q30",
+   "category": "multi_hop",
+   "suffix_tokens": [
+    61686,
+    24256,
+    279,
+    8251,
+    11,
+    323,
+    279,
+    6372,
+    686,
+    387,
+    7171,
+    13,
+    3555,
+    686,
+    3537,
+    311,
+    29405,
+    30
+   ],
+   "candidate_token_ids": [
+    34678,
+    359,
+    16088
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q31",
+   "category": "exception",
+   "suffix_tokens": [
+    785,
+    8251,
+    374,
+    537,
+    17545,
+    11,
+    714,
+    1128,
+    374,
+    1181,
+    1894,
+    304,
+    279,
+    5103,
+    3100,
+    30
+   ],
+   "candidate_token_ids": [
+    34571,
+    11650,
+    11453
+   ],
+   "expected_index": 0
+  },
+  {
+   "id": "q32",
+   "category": "composition",
+   "suffix_tokens": [
+    785,
+    12305,
+    374,
+    264,
+    5662,
+    11,
+    323,
+    279,
+    5662,
+    374,
+    82797,
+    13,
+    3555,
+    374,
+    279,
+    2038,
+    30
+   ],
+   "candidate_token_ids": [
+    969,
+    33,
+    32056
+   ],
+   "expected_index": 0
+  }
+ ]
+}

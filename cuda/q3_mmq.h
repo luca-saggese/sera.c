@@ -85,7 +85,13 @@ void q3_mmq_pool_set_stream(cudaStream_t stream);
  * sliced out of it, which is what keeps the hot path at zero
  * cudaMalloc/cudaFree. Attach once after q3_mmq_init(). */
 int    q3_mmq_set_arena(void *ptr, size_t bytes);
-size_t q3_mmq_arena_bytes(void);
+
+/* Bytes of persistent scratch the dense path needs for a worst-case call
+ * with `max_tokens` activation rows, `max_features` output features and
+ * `max_k` contraction length. Pass the model's real maxima; pass zeros to
+ * fall back to the donor's fixed floor (bench / primitive harness). */
+size_t q3_mmq_arena_bytes(size_t max_tokens, int64_t max_features,
+                          int64_t max_k);
 
 #ifdef __cplusplus
 }

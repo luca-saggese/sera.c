@@ -90,8 +90,9 @@ extern "C" bool q3_q4_linear_bind_geometry(uint32_t qtype,
     return true;
 }
 
-extern "C" bool q3_cuda_q4k_linear_init(int device, char *error,
-                                        size_t error_len) {
+extern "C" bool q3_cuda_q4k_linear_init(int device, size_t max_tokens,
+                                        int64_t max_features, int64_t max_k,
+                                        char *error, size_t error_len) {
     if (g_initialized && g_device == device) return true;
     if (device < 0) {
         set_error(error, error_len, "q3_q4_linear: invalid device index");
@@ -101,7 +102,7 @@ extern "C" bool q3_cuda_q4k_linear_init(int device, char *error,
         set_error(error, error_len, "q3_q4_linear: q3_mmq_init failed");
         return false;
     }
-    g_workspace_bytes = q3_mmq_arena_bytes();
+    g_workspace_bytes = q3_mmq_arena_bytes(max_tokens, max_features, max_k);
     if (!g_timings) {
         g_timings = q3_mmq_timings_create(nullptr);
         cudaEventCreate(&g_total_begin);

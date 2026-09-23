@@ -365,13 +365,23 @@ static void set_error(char *error, size_t error_len, const char *message) {
     }
 }
 
-static bool fail_cuda(char *error, size_t error_len, const char *what) {
+static bool fail_cuda_code(char *error, size_t error_len, const char *what,
+                           cudaError_t code) {
     if (error && error_len) {
         error[0] = '\0';
-        snprintf(error, error_len, "%s: %s", what, cudaGetErrorString(cudaGetLastError()));
+        snprintf(error, error_len, "%s: %s", what, cudaGetErrorString(code));
     }
     return false;
 }
+
+/* Check the last CUDA call and report it. Must be used immediately after the
+ * call: cudaGetLastError() clears the error, so capturing the code here (and
+ * not re-reading it in the reporter) is what keeps the message meaningful. */
+#define Q3_CUDA_CHECK(what) do { \
+    cudaError_t q3_cuda_code_ = cudaGetLastError(); \
+    if (q3_cuda_code_ != cudaSuccess) \
+        return fail_cuda_code(error, error_len, (what), q3_cuda_code_); \
+} while (0)
 
 /* =========================================================================
  * KV cache (M2 §17-§18). FP32, layout [layer][position][kv_head][head_dim].
@@ -402,8 +412,7 @@ extern "C" bool q3_cuda_rms_norm(const float *input, const float *weight,
     }
     rms_norm_batched_kernel<<<rows, 256, 0, (cudaStream_t)stream>>>(
         input, weight, output, rows, width, epsilon);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_rms_norm launch failed");
+    Q3_CUDA_CHECK("q3_cuda_rms_norm launch failed");
     return true;
 }
 
@@ -417,8 +426,7 @@ extern "C" bool q3_cuda_silu_mul(const float *gate, const float *up, float *out,
     }
     const unsigned grid = (unsigned)((elements + 255) / 256);
     silu_mul_kernel<<<grid, 256, 0, (cudaStream_t)stream>>>(gate, up, out, elements);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_silu_mul launch failed");
+    Q3_CUDA_CHECK("q3_cuda_silu_mul launch failed");
     return true;
 }
 
@@ -433,8 +441,7 @@ extern "C" bool q3_cuda_residual_add(float *accumulator, const float *addend,
     const unsigned grid = (unsigned)((elements + 255) / 256);
     residual_add_kernel<<<grid, 256, 0, (cudaStream_t)stream>>>(
         accumulator, addend, elements);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_residual_add launch failed");
+    Q3_CUDA_CHECK("q3_cuda_residual_add launch failed");
     return true;
 }
 
@@ -453,8 +460,7 @@ extern "C" bool q3_cuda_rope(float *q, float *k, uint32_t tokens,
     const unsigned grid = (unsigned)((total + 255) / 256);
     rope_kernel<<<grid, 256, 0, (cudaStream_t)stream>>>(
         q, k, tokens, n_heads, n_kv_heads, head_dim, position_base, inv_freq);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_rope launch failed");
+    Q3_CUDA_CHECK("q3_cuda_rope launch failed");
     return true;
 }
 
@@ -489,8 +495,7 @@ extern "C" bool q3_cuda_attention(const float *q, const float *k,
     attention_kernel<<<grid, 32, 0, (cudaStream_t)stream>>>(
         q, k_src, v_src, out, tokens, n_heads, n_kv_heads, head_dim,
         position_base, kv_length, scale);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_attention launch failed");
+    Q3_CUDA_CHECK("q3_cuda_attention launch failed");
     return true;
 }
 
@@ -509,8 +514,7 @@ extern "C" bool q3_cuda_embedding(float *hidden, const uint32_t *token_ids,
     const unsigned grid = (unsigned)((elements + 255) / 256);
     embedding_kernel<<<grid, 256, 0, (cudaStream_t)stream>>>(
         hidden, token_ids, weight, qtype, hidden_size, vocab_size);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_cuda_embedding launch failed");
+    Q3_CUDA_CHECK("q3_cuda_embedding launch failed");
     return true;
 }
 /* =========================================================================
@@ -642,6 +646,15 @@ struct q3_forward_runtime {
     uint32_t last_first_layer;
     uint32_t last_last_layer;
     bool last_ran;
+
+    /* Which phases the most recent run actually recorded. run_range() skips
+     * the embedding phase when it does not start at layer 0 and never records
+     * final-norm, and q3_candidate_logits() is a separate call, so reading an
+     * unrecorded event would raise a sticky CUDA error that poisons every
+     * later call. */
+    bool last_embedding_ran;
+    bool last_final_norm_ran;
+    bool last_candidate_ran;
 };
 
 static size_t align_up(size_t value, size_t alignment) {
@@ -681,10 +694,25 @@ extern "C" q3_forward_runtime *q3_forward_create(const q3_weights *weights,
     const uint32_t inter = config->intermediate_size;
     const size_t T = max_tokens;
 
-    /* MMQ arena size (needed before the workspace layout). */
-    if (!q3_cuda_q4k_linear_init(device, error, error_len)) {
-        free(rt);
-        return NULL;
+    /* MMQ arena size (needed before the workspace layout). Size it for the
+     * worst case the runtime can actually reach: the largest feature count
+     * (the LM head's row count) and the largest contraction length (the
+     * FFN's intermediate_size), at this runtime's token capacity.
+     *
+     * The feature count must come from the bound output tensor, not from
+     * config->vocab_size: the Qwen3 GGUF carries no vocab key, so that
+     * field is legitimately 0 and would collapse the arena back to its
+     * fallback floor. */
+    {
+        const int64_t max_features =
+            (int64_t) (weights->output.n ? weights->output.n
+                                         : config->vocab_size);
+        const int64_t max_k = (int64_t) config->intermediate_size;
+        if (!q3_cuda_q4k_linear_init(device, (size_t) max_tokens, max_features,
+                                     max_k, error, error_len)) {
+            free(rt);
+            return NULL;
+        }
     }
     rt->mmq_arena_bytes = q3_cuda_q4k_linear_workspace_bytes();
     rt->candidate_capacity = 64;
@@ -1021,6 +1049,9 @@ extern "C" bool q3_forward_run_range(q3_forward_runtime *runtime,
     runtime->last_first_layer = first_layer;
     runtime->last_last_layer = last_layer;
     runtime->last_ran = true;
+    runtime->last_embedding_ran = (first_layer == 0);
+    runtime->last_final_norm_ran = false;
+    runtime->last_candidate_ran = false;
 
     cudaStream_t stream = runtime->stream;
 
@@ -1076,6 +1107,7 @@ extern "C" bool q3_forward_final_norm(q3_forward_runtime *runtime,
                     runtime->config.hidden_size * sizeof(float),
                     cudaMemcpyDeviceToDevice, stream);
     cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_FINAL_NORM], stream);
+    runtime->last_final_norm_ran = true;
     if (stats) stats->token_count = token_count;
     return true;
 }
@@ -1146,16 +1178,24 @@ extern "C" bool q3_forward_synchronize(q3_forward_runtime *runtime,
         set_error(error, error_len, "q3_forward_synchronize: null runtime");
         return false;
     }
-    if (cudaStreamSynchronize(runtime->stream) != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_forward_synchronize failed");
+    {
+        const cudaError_t code = cudaStreamSynchronize(runtime->stream);
+        if (code != cudaSuccess)
+            return fail_cuda_code(error, error_len,
+                                  "q3_forward_synchronize failed", code);
+    }
 
-    /* Read the phase events into the last stats. */
+    /* Read the phase events into the last stats. Only phases the last run
+     * actually recorded are read: an unrecorded event would raise a sticky
+     * CUDA error. */
     q3_forward_stats *s = runtime->last_stats;
     if (s) {
         float ms = 0.0f;
-        cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_EMBED],
-                             runtime->phase_end[Q3_FWD_PHASE_EMBED]);
-        s->embedding_ms = ms;
+        if (runtime->last_embedding_ran) {
+            cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_EMBED],
+                                 runtime->phase_end[Q3_FWD_PHASE_EMBED]);
+            s->embedding_ms = ms;
+        }
         cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_NORM],
                              runtime->phase_end[Q3_FWD_PHASE_NORM]);
         s->norm_ms = ms;
@@ -1195,12 +1235,17 @@ extern "C" bool q3_forward_synchronize(q3_forward_runtime *runtime,
         cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_DOWN],
                              runtime->phase_end[Q3_FWD_PHASE_DOWN]);
         s->down_proj_ms = ms;
-        cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_FINAL_NORM],
-                             runtime->phase_end[Q3_FWD_PHASE_FINAL_NORM]);
-        s->final_norm_ms = ms;
-        cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_CAND],
-                             runtime->phase_end[Q3_FWD_PHASE_CAND]);
-        s->candidate_head_ms = ms;
+        if (runtime->last_final_norm_ran) {
+            cudaEventElapsedTime(&ms,
+                                 runtime->phase_begin[Q3_FWD_PHASE_FINAL_NORM],
+                                 runtime->phase_end[Q3_FWD_PHASE_FINAL_NORM]);
+            s->final_norm_ms = ms;
+        }
+        if (runtime->last_candidate_ran) {
+            cudaEventElapsedTime(&ms, runtime->phase_begin[Q3_FWD_PHASE_CAND],
+                                 runtime->phase_end[Q3_FWD_PHASE_CAND]);
+            s->candidate_head_ms = ms;
+        }
         s->total_forward_ms = s->embedding_ms + s->norm_ms + s->q_proj_ms +
             s->k_proj_ms + s->v_proj_ms + s->qk_norm_ms + s->rope_ms +
             s->attention_ms + s->o_proj_ms + s->mlp_norm_ms + s->gate_proj_ms +
@@ -1231,8 +1276,8 @@ extern "C" bool q3_candidate_logits(q3_forward_runtime *runtime,
     candidate_logits_kernel<<<candidate_count, 128, 0, stream>>>(
         device_hidden_last, out->device, out->qtype, runtime->config.hidden_size,
         runtime->candidate_ids_dev, device_logits);
-    if (cudaGetLastError() != cudaSuccess)
-        return fail_cuda(error, error_len, "q3_candidate_logits launch failed");
+    Q3_CUDA_CHECK("q3_candidate_logits launch failed");
     cudaEventRecord(runtime->phase_end[Q3_FWD_PHASE_CAND], stream);
+    runtime->last_candidate_ran = true;
     return true;
 }

@@ -72,7 +72,9 @@ bool q3_q4_linear_bind_geometry(uint32_t qtype,
  * attaches the persistent scratch arena that keeps the hot path at zero
  * cudaMalloc/cudaFree. Call after the CUDA device is chosen and before any
  * q3_cuda_q4k_linear() call. */
-bool q3_cuda_q4k_linear_init(int device, char *error, size_t error_len);
+bool q3_cuda_q4k_linear_init(int device, size_t max_tokens,
+                             int64_t max_features, int64_t max_k,
+                             char *error, size_t error_len);
 
 /* Bytes of persistent scratch the linear primitive needs for the given
  * worst-case geometry. Reserve this once per process. */

@@ -1,0 +1,33 @@
+{
+  "tokens": [785,5662,374,82797,13,576,8251,374,17545,13,576,15223,374,3691,13,576],
+  "candidate_token_ids": [16,17,18,19,33,969],
+  "candidate_logits": [2.330444,-1.815289,-0.655733,2.049469,0.803471,0.303445],
+  "candidate_argmax": 16,
+  "kv_length": 16,
+  "timing_ms": {
+    "embedding": 0.2947,
+    "input_norm": 0.0436,
+    "q_proj": 0.2456,
+    "k_proj": 0.1362,
+    "v_proj": 0.1489,
+    "qk_norm": 0.0332,
+    "rope": 0.0121,
+    "attention": 0.0635,
+    "o_proj": 0.3350,
+    "mlp_norm": 0.0435,
+    "gate_proj": 0.6512,
+    "up_proj": 0.6677,
+    "activation": 0.0206,
+    "down_proj": 0.8643,
+    "final_norm": 0.0500,
+    "candidate_head": 0.1317,
+    "total_forward": 3.7419
+  },
+  "counters": {
+    "token_count": 16,
+    "layers_executed": 64,
+    "cuda_allocations": 0,
+    "cuda_frees": 0,
+    "host_syncs": 0
+  }
+}

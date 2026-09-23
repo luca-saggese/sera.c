@@ -198,7 +198,9 @@ static bool real_open(real_world *w) {
         fprintf(stderr, "skip: geometry: %s\n", err);
         return false;
     }
-    if (!q3_cuda_q4k_linear_init(0, err, sizeof(err))) {
+    if (!q3_cuda_q4k_linear_init(0, /*max_tokens=*/16,
+                                 w->geometry.N, w->geometry.K,
+                                 err, sizeof(err))) {
         fprintf(stderr, "skip: init: %s\n", err);
         return false;
     }
