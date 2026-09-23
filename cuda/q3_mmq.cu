@@ -279,12 +279,17 @@ static int q3_mmq_dense_impl(const void *W, const float *X_f32,
     /* Deterministic tail (donor S1.1a fix). */
     ybuf_memset(ybuf, nbytes_src1_q8_1, stream);
 
-    /* The activation is FP32 and is always quantized to Q8_1 through the
-     * Q4_K path: the donor keys this on the *destination* layout only, and
-     * both K-quants share ggml_blck_size == 256 and the same Q8_1 block. */
+    /* The activation is FP32 and is always quantized to Q8_1, but the Q8_1
+     * *layout* is keyed on the weight type, not on the destination shape:
+     * mmq_get_q8_1_ds_layout() maps Q4_K -> DS4 (half2 scale+sum per 32
+     * values) and Q6_K -> D4 (float scale per 32 values). Both layouts live
+     * in the same block_q8_1_mmq union and have identical size/stride, so
+     * only the type argument selects the correct interpretation. Passing
+     * Q4_K for a Q6_K weight would write ds4[] where the kernel reads d4[],
+     * producing garbage scales. */
     quantize_mmq_q8_1_cuda(
         X_f32, /*ids=*/nullptr, ybuf,
-        GGML_TYPE_Q4_K, /*ne00=*/K, /*s11=*/(int64_t) K,
+        type, /*ne00=*/K, /*s11=*/(int64_t) K,
         /*s12=*/0, /*s13=*/0,
         /*ne0=*/ne10_padded, /*ne1=*/N, /*ne2=*/1, /*ne3=*/1,
         stream);
