@@ -18,8 +18,8 @@ M0 (`src/q3_gguf.*`, `src/q3_residency*.*`, `cuda/q3_cuda.cu`,
 `cuda/q3_model_loader_cuda.*`, parts of `src/q3_main.c`) was ported from the
 `qwen38-spark-proto` branch of q38.c.
 
-M1 (`cuda/q3_mmq.*`, `src/q3_q4_linear.*`, `src/q3_quant.*`,
-`cuda/vendor/*`, `tests/test_q3_q4_linear.cu`) was ported from the `main`
+M1 (`cuda/q3_mmq.*`, `cuda/mmq/*`, `src/q3_q4_linear.*`, `src/q3_quant.*`,
+`tests/test_q3_q4_linear.cu`) was ported from the `main`
 branch of q38.c, in particular from `cuda/mmq/`. The port follows the
 project rule COPY -> RENAME -> EDIT: donor files are copied, symbols are
 mechanically renamed (`ds4_*` -> `q3_*`), and DS4-specific functionality
@@ -31,9 +31,9 @@ NVTX instrumentation) is removed.
 used only as read-only references for the port. Nothing at build or run
 time depends on them.
 
-## llama.cpp — upstream of the vendored MMQ kernels
+## llama.cpp — upstream of the native MMQ kernels
 
-The Q4_K MMQ/MMVQ compute kernels in `cuda/vendor/` were originally ported
+The Q4_K MMQ/MMVQ compute kernels in `cuda/mmq/` were originally ported
 by q38.c (`cuda/mmq/VENDOR.md`) from llama.cpp's `ggml-cuda` backend.
 sera.c inherits them from q38.c, which is the only direct donor used here.
 
@@ -44,15 +44,17 @@ sera.c inherits them from q38.c, which is the only direct donor used here.
 | Commit date  | 2026-05-14                                                                      |
 | License      | MIT, copyright "2023-2026 The ggml authors"                                     |
 
-Vendored files (verbatim unless noted): `mmq.cuh`, `mma.cuh`, `vecdotq.cuh`,
-`quantize.cuh`, `quantize.cu`, `mmvq.cu`, `mmvq.cuh`, `unary.cuh`,
-`common.cuh`, `ggml-common.h`, `vendors/cuda.h`. The `ggml.h`,
-`ggml-impl.h` and `ggml-cuda.h` copies in `cuda/vendor/` are one-line
+Copied files in `cuda/mmq/`: `mmq.cuh`, `mma.cuh`, `vecdotq.cuh`,
+`quantize.cuh`, `quantize.cu`, `mmvq.cu`, `mmvq.cuh`,
+`common.cuh`, `ggml-common.h`, `vendors/cuda.h`. (`unary.cuh` came along
+with the donor `mmvq.cu` but is not reachable from the trimmed M1 path and
+was dropped.) The `ggml.h`,
+`ggml-impl.h` and `ggml-cuda.h` copies in `cuda/mmq/` are one-line
 redirects to the local shim and contain no upstream code.
 
 ## Stubs
 
-`cuda/vendor/q3_ggml_stubs.{h,cu}` are sera.c-local adapters (derived from
+`cuda/mmq/q3_ggml_stubs.{h,cu}` are sera.c-local adapters (derived from
 q38.c's `ds4_ggml_stubs.{h,cu}`). They provide the handful of macros and
 type helpers the vendored kernels reference, so that no ggml runtime,
 scheduler, allocator or graph engine is required.

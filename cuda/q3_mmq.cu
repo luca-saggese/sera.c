@@ -6,11 +6,11 @@
  *   _reference/q38-main/cuda/mmq/ds4_mmq.cu
  *     q38-main HEAD c1d4597a80e300b803dc642519718f2c999589da (MIT)
  *
- * The vendored device kernels in cuda/vendor/ are llama.cpp ggml-cuda files
+ * The native device kernels in cuda/mmq/ are llama.cpp ggml-cuda files
  * copied verbatim by q38 (MIT, (c) 2023-2026 The ggml authors); see
  * THIRD_PARTY_NOTES.md for provenance. No ggml runtime, graph, scheduler or
  * allocator participates: the vendored headers resolve ggml.h / ggml-impl.h /
- * ggml-cuda.h to cuda/vendor/q3_ggml_stubs.h.
+ * ggml-cuda.h to cuda/mmq/q3_ggml_stubs.h.
  *
  * M1 scope: Q4_K weights x FP32 activations -> FP32, dense only, Q8_1
  * activation quantization, GB10 / SM121. Everything DS4-specific was removed
@@ -106,7 +106,7 @@ unsigned char * g_arena_base     = nullptr;
 size_t          g_arena_bytes    = 0;
 
 /* Single bump pointer, shared with the pool the vendored kernel reaches
- * through ctx.pool() (cuda/vendor/q3_ggml_stubs.cu keeps the same cursor).
+ * through ctx.pool() (cuda/mmq/q3_ggml_stubs.cu keeps the same cursor).
  * Sharing it is essential: the stream-K fixup scratch is allocated from the
  * pool *after* the Q8_1 activation buffer was already sliced out here, so a
  * second independent cursor would hand back the activation buffer again and
@@ -152,7 +152,7 @@ void ybuf_memset(void *ptr, size_t bytes, cudaStream_t stream) {
  * The donor kept a ggml_backend_cuda_context per device purely so
  * mul_mat_q_case() could reach a pool and the device-info singleton. The
  * object shape is kept because the vendored signature expects it; its pool
- * is backed by our arena (cuda/vendor/q3_ggml_stubs.cu).
+ * is backed by our arena (cuda/mmq/q3_ggml_stubs.cu).
  * ------------------------------------------------------------------ */
 static ggml_backend_cuda_context * get_ctx_for_device(int device) {
     static ggml_backend_cuda_context * cached[GGML_CUDA_MAX_DEVICES] = {};
