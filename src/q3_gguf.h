@@ -110,6 +110,32 @@ bool q3_gguf_get_f32(const q3_gguf *m, const char *key, float *out);
 bool q3_gguf_get_value(const q3_gguf *m, const char *key, const void **ptr,
                        uint64_t *size, uint32_t *type);
 
+/* Array metadata access. Decodes the GGUF array header (item type + count)
+ * and returns a cursor over the items. `*item_type` is a Q3_GGUF_VALUE_* code
+ * and `*count` the element count. The returned cursor is opaque; advance it
+ * with q3_gguf_array_next_*(). Returns false when the key is absent, is not an
+ * array, or the header is malformed. */
+typedef struct {
+    const uint8_t *base;
+    uint64_t size;
+    uint64_t pos;
+    uint32_t item_type;
+    uint64_t count;
+    uint64_t index;
+} q3_gguf_array;
+
+bool q3_gguf_get_array(const q3_gguf *m, const char *key, q3_gguf_array *out);
+
+/* Read the next array element. `q3_gguf_array_next_string` yields a q3_str
+ * pointing into the mmap; `q3_gguf_array_next_u32`/`_i32` yield the scalar.
+ * Return false at end of array or on a type mismatch. */
+bool q3_gguf_array_next_string(q3_gguf_array *a, q3_str *out);
+bool q3_gguf_array_next_u32(q3_gguf_array *a, uint32_t *out);
+bool q3_gguf_array_next_i32(q3_gguf_array *a, int32_t *out);
+/* GGUF exporters write the same logical "small integer" array as either
+ * INT32 or UINT32; token_type is UINT32 in the Qwen3 export. Accept both. */
+bool q3_gguf_array_next_int(q3_gguf_array *a, int32_t *out);
+
 /* Tensor-type helpers. */
 const char *q3_gguf_type_name(uint32_t type);
 bool q3_gguf_type_nbytes(uint32_t type, uint64_t elements, uint64_t *bytes);

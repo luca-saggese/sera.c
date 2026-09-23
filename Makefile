@@ -6,6 +6,7 @@
 CC      ?= cc
 CFLAGS  ?= -O3 -g -Wall -Wextra -std=c99 -D_GNU_SOURCE -fno-finite-math-only -Isrc -pthread
 CFLAGS  += -DQ3_DIAGNOSTICS=1
+CFLAGS  += -Isrc/io -Isrc/server
 
 CUDA_HOME ?= $(shell if [ -x /usr/local/cuda/bin/nvcc ]; then \
 	printf '%s' /usr/local/cuda; \
@@ -18,6 +19,7 @@ NVCC ?= $(CUDA_HOME)/bin/nvcc
 NVCC_ARCH_FLAGS := -gencode arch=compute_121a,code=sm_121a
 NVCCFLAGS ?= -O3 -g -lineinfo --use_fast_math -Isrc $(NVCC_ARCH_FLAGS)
 NVCCFLAGS += -DQ3_DIAGNOSTICS=1
+NVCCFLAGS += -Isrc/io -Isrc/server
 # The native Q4_K MMQ/MMVQ compute closure is C++17 and uses ggml-style
 # compatibility headers that live in cuda/mmq/.
 NVCC_MMQ_FLAGS := -std=c++17 -Icuda/mmq -Icuda -Xcompiler -Wno-unused-parameter
@@ -57,21 +59,48 @@ MMQ_OBJS := \
 
 OBJS := $(C_OBJS) $(CUDA_OBJS) $(MMQ_OBJS)
 
+# M4: the System One HTTP server (docs/M4.md §20). Same compute closure as the
+# CLI, plus the HTTP/JSON boundary, the tokenizer and the runtime seam. The CLI
+# entry point is excluded: the server owns main().
+SERVER_BIN  := build/q3-server
+SERVER_OBJS := $(filter-out src/q3_main.o,$(OBJS)) \
+	src/io/hd_json.o \
+	src/q3_tokenizer.o \
+	cuda/q3_systemone.o \
+	src/server/q3_server.o
+
 TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear \
 	tests/test_q3_forward_primitives tests/test_q3_forward tests/test_q3_decide
 
-.PHONY: all clean test test-gguf test-plan test-q4-linear test-forward-primitives test-forward test-decide
+.PHONY: all clean test test-gguf test-plan test-q4-linear test-forward-primitives test-forward test-decide server
 
 all: $(BIN)
 
 $(BIN): $(OBJS)
 	$(NVCC) $(NVCCFLAGS) -o $@ $(OBJS) $(CUDA_LDLIBS)
 
+server: $(SERVER_BIN)
+
+$(SERVER_BIN): $(SERVER_OBJS)
+	@mkdir -p build
+	$(NVCC) $(NVCCFLAGS) -o $@ $(SERVER_OBJS) $(CUDA_LDLIBS)
+
 src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 cuda/%.o: src/%.cu
 	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -c $< -o $@
+
+cuda/q3_systemone.o: src/q3_systemone.cu
+	$(NVCC) $(NVCCFLAGS) $(NVCC_MMQ_FLAGS) -c $< -o $@
+
+src/server/%.o: src/server/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+src/io/%.o: src/io/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 cuda/%.o: cuda/%.cu
 	$(NVCC) $(NVCCFLAGS) -c $< -o $@
@@ -130,4 +159,5 @@ test-decide: tests/test_q3_decide
 test: test-gguf test-plan test-q4-linear test-forward-primitives test-forward test-decide
 
 clean:
-	rm -f $(OBJS) $(BIN) $(TESTS)
+	rm -f $(OBJS) $(BIN) $(TESTS) $(SERVER_BIN)
+	rm -rf src/server/*.o src/io/*.o build

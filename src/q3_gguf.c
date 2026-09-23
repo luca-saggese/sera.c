@@ -521,3 +521,64 @@ bool q3_gguf_get_value(const q3_gguf *m, const char *key, const void **ptr,
     if (type) *type = kv->type;
     return true;
 }
+
+bool q3_gguf_get_array(const q3_gguf *m, const char *key, q3_gguf_array *out) {
+    if (!m || !key || !out) return false;
+    q3_kv *kv = q3_gguf_find_kv(m, key);
+    if (!kv || kv->type != GGUF_VALUE_ARRAY) return false;
+    q3_cursor c = cursor_at(m, kv->value_pos);
+    uint32_t item_type;
+    uint64_t count;
+    if (!cursor_u32(&c, &item_type)) return false;
+    if (!cursor_u64(&c, &count)) return false;
+    out->base = m->map;
+    out->size = m->size;
+    out->pos = c.pos;
+    out->item_type = item_type;
+    out->count = count;
+    out->index = 0;
+    return true;
+}
+
+static bool array_next(q3_gguf_array *a, uint32_t want_type) {
+    if (!a || a->index >= a->count || a->item_type != want_type) return false;
+    a->index++;
+    return true;
+}
+
+bool q3_gguf_array_next_string(q3_gguf_array *a, q3_str *out) {
+    if (!array_next(a, GGUF_VALUE_STRING)) return false;
+    q3_cursor c = {a->base, a->size, a->pos, {0}};
+    if (!cursor_string(&c, out)) return false;
+    a->pos = c.pos;
+    return true;
+}
+
+bool q3_gguf_array_next_u32(q3_gguf_array *a, uint32_t *out) {
+    if (!array_next(a, GGUF_VALUE_UINT32)) return false;
+    q3_cursor c = {a->base, a->size, a->pos, {0}};
+    if (!cursor_u32(&c, out)) return false;
+    a->pos = c.pos;
+    return true;
+}
+
+bool q3_gguf_array_next_i32(q3_gguf_array *a, int32_t *out) {
+    if (!array_next(a, GGUF_VALUE_INT32)) return false;
+    q3_cursor c = {a->base, a->size, a->pos, {0}};
+    if (!cursor_read(&c, out, sizeof(*out))) return false;
+    a->pos = c.pos;
+    return true;
+}
+bool q3_gguf_array_next_int(q3_gguf_array *a, int32_t *out) {
+    if (!a || !out) return false;
+    if (a->item_type == GGUF_VALUE_INT32) return q3_gguf_array_next_i32(a, out);
+    if (a->item_type != GGUF_VALUE_UINT32) return false;
+    if (a->index >= a->count) return false;
+    uint32_t v;
+    q3_cursor c = {a->base, a->size, a->pos, {0}};
+    if (!cursor_read(&c, &v, sizeof(v))) return false;
+    a->pos = c.pos;
+    a->index++;
+    *out = (int32_t)v;
+    return true;
+}
