@@ -234,10 +234,10 @@ __global__ static void attention_kernel(const float *q, const float *k,
 
     const uint32_t lane = threadIdx.x;
     /* One warp per (token, head). Each lane owns head_dim/32 = 4 dims, so
-     * the warp shuffle reduces the dot over all head_dim elements. After
-     * the reduction every lane holds the same full dot, so max_score and
-     * den are identical across lanes: no shared memory, no cross-warp
-     * race. */
+     * the warp shuffle reduces the dot over all head_dim elements. The
+     * butterfly reduction leaves the full sum only in lane 0, so it is
+     * broadcast back to every lane before max_score/den/acc are computed:
+     * all lanes must agree on the same dot. */
     const uint32_t dims_per_lane = head_dim / 32;
     /* Causal: the current token attends to all cached positions up to and
      * including its own absolute position. */
@@ -255,6 +255,7 @@ __global__ static void attention_kernel(const float *q, const float *k,
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         max_score = fmaxf(max_score, dot * scale);
     }
 
@@ -272,6 +273,7 @@ __global__ static void attention_kernel(const float *q, const float *k,
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         const float p = __expf(dot * scale - max_score);
         den += p;
         for (uint32_t i = 0; i < dims_per_lane; i++) {
@@ -333,11 +335,13 @@ __global__ static void candidate_logits_kernel(const float *hidden,
     const uint32_t c = blockIdx.x;
     const uint32_t id = candidate_ids[c];
     const uint32_t blocks_per_row = hidden_size / Q3_QUANT_QK_K;
-    const uint32_t lane = threadIdx.x;
+    const uint32_t lane = threadIdx.x & 31u;
+    const uint32_t warp = threadIdx.x >> 5u;
+    __shared__ float warp_sums[8];
     float sum = 0.0f;
     for (uint32_t block = 0; block < blocks_per_row; block++) {
         const size_t block_index = (size_t)id * blocks_per_row + block;
-        for (uint32_t e = lane; e < Q3_QUANT_QK_K; e += blockDim.x) {
+        for (uint32_t e = threadIdx.x; e < Q3_QUANT_QK_K; e += blockDim.x) {
             const uint32_t feature = block * Q3_QUANT_QK_K + e;
             float w;
             if (qtype == Q3_QUANT_Q4_K) {
@@ -349,9 +353,20 @@ __global__ static void candidate_logits_kernel(const float *hidden,
             sum += w * hidden[feature];
         }
     }
+    /* Intra-warp reduction, then a cross-warp reduction through shared
+     * memory. The block is wider than one warp, so a single shfl_down chain
+     * would drop every warp except warp 0. */
     for (unsigned offset = 16; offset; offset >>= 1)
         sum += __shfl_down_sync(0xffffffffu, sum, offset);
-    if (lane == 0) logits[c] = sum;
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        const uint32_t warps = (blockDim.x + 31u) >> 5u;
+        float block_sum = lane < warps ? warp_sums[lane] : 0.0f;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            block_sum += __shfl_down_sync(0xffffffffu, block_sum, offset);
+        if (lane == 0) logits[c] = block_sum;
+    }
 }
 
 /* =========================================================================
@@ -445,6 +460,7 @@ __global__ static void attention_segmented_kernel(
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         max_score = fmaxf(max_score, dot * scale);
     }
     for (uint32_t j = 0; j <= lp; j++) {
@@ -456,6 +472,7 @@ __global__ static void attention_segmented_kernel(
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         max_score = fmaxf(max_score, dot * scale);
     }
 
@@ -473,6 +490,7 @@ __global__ static void attention_segmented_kernel(
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         const float p = __expf(dot * scale - max_score);
         den += p;
         for (uint32_t i = 0; i < dims_per_lane; i++) {
@@ -490,6 +508,7 @@ __global__ static void attention_segmented_kernel(
         }
         for (unsigned offset = 16; offset; offset >>= 1)
             dot += __shfl_down_sync(0xffffffffu, dot, offset);
+        dot = __shfl_sync(0xffffffffu, dot, 0);
         const float p = __expf(dot * scale - max_score);
         den += p;
         for (uint32_t i = 0; i < dims_per_lane; i++) {
