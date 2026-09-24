@@ -192,8 +192,12 @@ extern "C" bool q3_build_decision_suffix(q3_qtype qtype,
         if (criteria && criteria->type == HD_JSON_OBJECT) {
             const hd_json *fv = hd_json_get(criteria, "false");
             const hd_json *tv = hd_json_get(criteria, "true");
-            if (hd_json_string(fv)) f = hd_json_string(fv);
-            if (hd_json_string(tv)) t = hd_json_string(tv);
+            const char *fs = hd_json_string(fv);
+            const char *ts = hd_json_string(tv);
+            /* A criteria value overrides the default label; an empty string
+             * would leave the option with no token to score. */
+            if (fs && fs[0]) f = fs;
+            if (ts && ts[0]) t = ts;
         }
         keys[0] = so_strdup("false"); labels[0] = so_strdup(f); texts[0] = so_strdup(f);
         keys[1] = so_strdup("true");  labels[1] = so_strdup(t); texts[1] = so_strdup(t);

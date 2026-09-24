@@ -393,9 +393,17 @@ static bool http_response(int fd, bool enable_cors, int code, const char *type,
     return ok;
 }
 
+/* Every error response is also echoed on stderr so a failing request can be
+ * diagnosed from the server console, not only from the client body. */
+static void log_error(int code, const char *msg) {
+    fprintf(stderr, "q3-server: error %d: %s\n", code,
+            (msg && msg[0]) ? msg : "(no message)");
+}
+
 /* Error body: a small {"error":"..."} object. The spec intentionally does
  * not reuse the OpenAI envelope, and the exact prose is not contractual. */
 static bool http_error(int fd, bool enable_cors, int code, const char *msg) {
+    log_error(code, msg);
     buf b = {0};
     buf_puts(&b, "{\"error\":");
     json_escape(&b, msg ? msg : "error");
@@ -670,8 +678,13 @@ static bool validate_choice(const hd_json *qdef, buf *err, const char *qid) {
     const size_t n = crit->u.object.count;
     if (n < 2)
         return reject_question(err, qid, "choice needs at least 2 criteria");
-    if (n > 255)
-        return reject_question(err, qid, "choice supports at most 255 criteria");
+    if (n > Q3_MAX_CANDIDATES) {
+        buf_printf(err,
+                   "question '%s': choice has %zu criteria but the runtime "
+                   "supports at most %d (Q3_MAX_CANDIDATES)",
+                   qid ? qid : "?", n, (int)Q3_MAX_CANDIDATES);
+        return false;
+    }
     for (size_t i = 0; i < n; i++) {
         if (!crit->u.object.keys[i] || !crit->u.object.keys[i][0])
             return reject_question(err, qid, "choice criteria keys must be non-empty");
@@ -1126,7 +1139,13 @@ static void job_run(server_job *j) {
     long tokens = 0;
     q3_status st = q3_systemone_run(&g_model, root, &res, &n, &tokens);
     if (st != Q3_OK) {
-        job_error(j, 500, q3_last_error());
+        /* The runtime reports its reason through q3_last_error(), which may be
+         * empty for low-level CUDA failures; always surface the status too. */
+        const char *why = q3_last_error();
+        char msg[512];
+        snprintf(msg, sizeof(msg), "runtime error %d: %s", (int)st,
+                 (why && why[0]) ? why : "(no message)");
+        job_error(j, 500, msg);
         hd_json_free(root);
         return;
     }

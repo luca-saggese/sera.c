@@ -203,7 +203,7 @@ bool q3_cuda_embedding(float *hidden, const uint32_t *token_ids,
  * of the prefix (M3 §11, §12, §14). */
 
 #define Q3_PACK_MAX_BRANCHES 32
-#define Q3_PACK_MAX_CANDIDATES 8
+#define Q3_PACK_MAX_CANDIDATES 30
 /* Device staging for the batched candidate head: one row per (branch,
  * candidate) pair (M3 §26). */
 #define Q3_CANDIDATE_CAPACITY (Q3_PACK_MAX_BRANCHES * Q3_PACK_MAX_CANDIDATES)
