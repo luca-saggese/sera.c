@@ -2,6 +2,10 @@
 models/
 *.gguf
 
+# M5: HF checkpoint download and the Q4_K payload store (both live on /mnt)
+artifacts/m5_parity/hf_checkpoint/
+artifacts/m5_parity/q4
+
 # Local donor clone (reference only)
 _reference/
 
