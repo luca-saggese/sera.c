@@ -1,0 +1,1 @@
+{"name":"Qwen3-32B-Q4-production","architecture":"qwen3","version":3,"alignment":32,"tensor_data_pos":5968448,"metadata_keys":25,"tensors":707,"file_bytes":18436989504,"tensor_bytes":18431021056,"logical_parameters":32762123264,"largest_tensor":"output.weight","largest_tensor_bytes":437575680}
