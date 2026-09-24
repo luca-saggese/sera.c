@@ -15,11 +15,14 @@ build/
 *.so
 *.a
 /q3
-/q3
+
+# Test binaries (all are build outputs)
 tests/test_q3_gguf
 tests/test_q3_residency_plan
+tests/test_q3_q4_linear
+tests/test_q3_forward_primitives
+tests/test_q3_forward
+tests/test_q3_decide
 tests/fixtures/*.bin
 
-# M1 test binaries
-tests/test_q3_q4_linear
 __pycache__/
