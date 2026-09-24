@@ -57,8 +57,24 @@ def main():
     state_ids = ids(workload["state_prompt"])
     questions = []
     for q in workload["questions"]:
-        suffix_ids = ids(q["suffix_prompt"])
-        cand_ids = [ids(c)[0] for c in q["candidates"]]
+        opts = "\n".join(
+            f"{i+1}. {c}"
+            for i, c in enumerate(q["candidates"])
+        )
+
+        suffix = (
+            f"QUESTION:\n{q['suffix_prompt']}\n\n"
+            f"OPTIONS:\n{opts}\n\n"
+            f"ANSWER:"
+        )
+
+        suffix_ids = ids(suffix)
+
+        cand_ids = []
+        for i in range(len(q["candidates"])):
+            x = ids(str(i + 1))
+            assert len(x) == 1
+            cand_ids.append(x[0])
         questions.append({
             "id": q["id"],
             "category": q["category"],

@@ -213,6 +213,31 @@ extern "C" bool q3_build_decision_suffix(q3_qtype qtype,
         return false;
     }
 
+    /* v4 numeric protocol: numbered options plus an explicit ANSWER: cue, so
+     * the scored candidate is the option number and not the option text. */
+    {
+        size_t cap = strlen(suffix) + 64;
+        for (int i = 0; i < n; i++) cap += strlen(labels[i]) + 24;
+        char *full = (char *)malloc(cap);
+        if (!full) {
+            so_free_strv(keys, n);
+            so_free_strv(labels, n);
+            so_free_strv(texts, n);
+            free(suffix);
+            so_set_error(error, error_len, "out of memory");
+            return false;
+        }
+        size_t used = 0;
+        used += (size_t)snprintf(full + used, cap - used, "QUESTION:\n%s\n\nOPTIONS:\n",
+                                 suffix);
+        for (int i = 0; i < n; i++)
+            used += (size_t)snprintf(full + used, cap - used, "%d. %s\n",
+                                     i + 1, labels[i]);
+        snprintf(full + used, cap - used, "\nANSWER:");
+        free(suffix);
+        suffix = full;
+    }
+
     *suffix_out = suffix;
     *n_options_out = n;
     *keys_out = keys;
@@ -585,19 +610,22 @@ q3_status q3_systemone_run(q3_model *model, const hd_json *request,
             break;
         }
         for (int k = 0; k < n_opts; k++) {
+            char num[16];
+            snprintf(num, sizeof(num), "%d", k + 1);
             uint32_t *oid = NULL;
             uint32_t oc = 0;
-            if (!so_encode(tok, texts[k], &oid, &oc, err, sizeof(err)) || oc == 0) {
+            if (!so_encode(tok, num, &oid, &oc, err, sizeof(err)) || oc != 1) {
                 free(oid);
                 free(cids); free(sids);
                 so_free_strv(keys, n_opts); so_free_strv(labels, n_opts);
                 so_free_strv(texts, n_opts);
                 so_set_error(err, sizeof(err),
-                             "question %s option %d did not tokenize", key, k);
+                             "question %s option %d number did not tokenize",
+                             key, k);
                 st = Q3_ERR_RUNTIME;
                 break;
             }
-            cids[k] = oid[0]; /* M3 §56: the first token is the candidate */
+            cids[k] = oid[0]; /* v4: the candidate is the option number */
             free(oid);
         }
         if (st != Q3_OK) break;
