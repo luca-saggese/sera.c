@@ -59,6 +59,14 @@ MMQ_OBJS := \
 
 OBJS := $(C_OBJS) $(CUDA_OBJS) $(MMQ_OBJS)
 
+# The CLI correctness run reaches the decision protocol through the same
+# production entry point as the server (q3_systemone_run), so the CLI links the
+# System One boundary too: JSON parser, GGUF tokenizer, runtime seam.
+CLI_SYSTEMONE_OBJS := \
+	src/io/hd_json.o \
+	src/q3_tokenizer.o \
+	cuda/q3_systemone.o
+
 # M4: the System One HTTP server (docs/M4.md §20). Same compute closure as the
 # CLI, plus the HTTP/JSON boundary, the tokenizer and the runtime seam. The CLI
 # entry point is excluded: the server owns main().
@@ -76,8 +84,8 @@ TESTS := tests/test_q3_gguf tests/test_q3_residency_plan tests/test_q3_q4_linear
 
 all: $(BIN)
 
-$(BIN): $(OBJS)
-	$(NVCC) $(NVCCFLAGS) -o $@ $(OBJS) $(CUDA_LDLIBS)
+$(BIN): $(OBJS) $(CLI_SYSTEMONE_OBJS)
+	$(NVCC) $(NVCCFLAGS) -o $@ $(OBJS) $(CLI_SYSTEMONE_OBJS) $(CUDA_LDLIBS)
 
 server: $(SERVER_BIN)
 
