@@ -132,23 +132,19 @@ int q3_cmd_bench_decisions(const q3_options *opt) {
     if (max_packed == 0) max_packed = 1;
 
     /* The runtime must never be created with a capacity below the workload it
-     * is about to run: max(prefix prefill, largest packed suffix batch). */
+     * is about to run: max(prefix prefill, largest packed suffix batch). The
+     * prefix prefill runs through the same runtime, so its token count has to
+     * fit too. */
     uint32_t runtime_tokens = w->state_count;
     if (max_packed > runtime_tokens) runtime_tokens = max_packed;
-    /* The packed batch forward only reads weights, so its temporary buffers
-     * only need to cover the largest packed batch; the prefix prefill runs on
-     * its own, before the branch set exists. Keeping this at max_packed (and
-     * not max(max_packed, state_count)) keeps the MMQ arena sized for the
-     * workload that actually uses it. */
-    uint32_t fwd_tokens = max_packed;
-    if (fwd_tokens == 0) fwd_tokens = 1;
+    if (runtime_tokens == 0) runtime_tokens = 1;
     if (opt->verbose)
         fprintf(stderr,
-                "q3: prefix=%u max_packed=%u runtime_tokens=%u fwd_tokens=%u\n",
-                w->state_count, max_packed, runtime_tokens, fwd_tokens);
+                "q3: prefix=%u max_packed=%u runtime_tokens=%u\n",
+                w->state_count, max_packed, runtime_tokens);
 
-    q3_forward_runtime *rt = q3_forward_create(&weights, &cfg, fwd_tokens, 0,
-                                               err, sizeof(err));
+    q3_forward_runtime *rt = q3_forward_create(&weights, &cfg, runtime_tokens,
+                                               0, err, sizeof(err));
     if (!rt) {
         fprintf(stderr, "q3: %s\n", err);
         q3_weights_free(&weights);
@@ -327,9 +323,19 @@ int q3_cmd_bench_decisions(const q3_options *opt) {
 
         uint32_t matches = 0;
         if (ok) {
-            for (uint32_t i = 0; i < plan.question_count; i++)
+            for (uint32_t i = 0; i < plan.question_count; i++) {
                 if (results[i].predicted_index == w->questions[i].expected_index)
                     matches++;
+                if (opt->verbose) {
+                    const q3_workload_question *q = &w->questions[i];
+                    fprintf(stderr, "  %-6s pred=%u exp=%u logits=", q->id,
+                            results[i].predicted_index, q->expected_index);
+                    for (uint32_t k = 0; k < results[i].candidate_count; k++)
+                        fprintf(stderr, "%s%.4f", k ? "," : "",
+                                results[i].logits[k]);
+                    fprintf(stderr, "\n");
+                }
+            }
             total_matches += matches;
             total_questions += plan.question_count;
         } else {

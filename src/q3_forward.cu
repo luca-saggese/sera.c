@@ -573,11 +573,13 @@ __global__ static void candidate_logits_batched_kernel(
     const uint32_t id = candidate_ids[index];
     const float *hidden = hidden_per_branch + (size_t)b * hidden_size;
     const uint32_t blocks_per_row = hidden_size / Q3_QUANT_QK_K;
-    const uint32_t lane = threadIdx.x;
+    const uint32_t lane = threadIdx.x & 31u;
+    const uint32_t warp = threadIdx.x >> 5u;
+    __shared__ float warp_sums[8];
     float sum = 0.0f;
     for (uint32_t block = 0; block < blocks_per_row; block++) {
         const size_t block_index = (size_t)id * blocks_per_row + block;
-        for (uint32_t e = lane; e < Q3_QUANT_QK_K; e += blockDim.x) {
+        for (uint32_t e = threadIdx.x; e < Q3_QUANT_QK_K; e += blockDim.x) {
             const uint32_t feature = block * Q3_QUANT_QK_K + e;
             float w;
             if (qtype == Q3_QUANT_Q4_K) {
@@ -589,9 +591,19 @@ __global__ static void candidate_logits_batched_kernel(
             sum += w * hidden[feature];
         }
     }
+    /* Same cross-warp reduction as candidate_logits_kernel: the CTA is wider
+     * than one warp, so a bare shfl_down chain would drop every warp but 0. */
     for (unsigned offset = 16; offset; offset >>= 1)
         sum += __shfl_down_sync(0xffffffffu, sum, offset);
-    if (lane == 0) logits[index] = sum;
+    if (lane == 0) warp_sums[warp] = sum;
+    __syncthreads();
+    if (warp == 0) {
+        const uint32_t warps = (blockDim.x + 31u) >> 5u;
+        float block_sum = lane < warps ? warp_sums[lane] : 0.0f;
+        for (unsigned offset = 16; offset; offset >>= 1)
+            block_sum += __shfl_down_sync(0xffffffffu, block_sum, offset);
+        if (lane == 0) logits[index] = block_sum;
+    }
 }
 
 /* =========================================================================
