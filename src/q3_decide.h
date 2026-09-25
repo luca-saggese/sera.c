@@ -22,7 +22,7 @@ extern "C" {
 
 #define Q3_MAX_BRANCHES Q3_PACK_MAX_BRANCHES
 #define Q3_MAX_CANDIDATES Q3_PACK_MAX_CANDIDATES
-#define Q3_DEFAULT_SUFFIX_CAP 256
+#define Q3_DEFAULT_SUFFIX_CAP 512
 
 /* One decision question: a private suffix plus the candidate rows to score. */
 typedef struct {
