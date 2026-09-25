@@ -233,7 +233,7 @@ extern "C" bool q3_build_decision_suffix(q3_qtype qtype,
         for (int i = 0; i < n; i++)
             used += (size_t)snprintf(full + used, cap - used, "%d. %s\n",
                                      i + 1, labels[i]);
-        snprintf(full + used, cap - used, "\nANSWER:");
+        snprintf(full + used, cap - used, "\nANSWER: ");
         free(suffix);
         suffix = full;
     }
